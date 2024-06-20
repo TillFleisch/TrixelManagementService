@@ -1,0 +1,4 @@
+fastapi==0.111.0
+openapi-python-client==0.21.0
+toml==0.10.2
+trixelmanagementserver

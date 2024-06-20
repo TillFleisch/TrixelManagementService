@@ -1,0 +1,31 @@
+[tool.black]
+line-length = 120
+
+[tool.flake8]
+max-line-length = 120
+
+[tool.isort]
+profile = "black"
+known_local_folder = ["src", "tests"]
+
+[project.optional-dependencies]
+dev = ["black", "isort", "pytest"]
+
+[project]
+name = "trixelmanagementserver"
+version = "0.0.0"
+description = "The Trixel-Management-Service (server) handles participating measurement stations and ensures location and data-privacy."
+readme = "README.md"
+authors = [{ name = "Till", email = "till@fleisch.dev" }]
+license = { file = "LICENSE" }
+keywords = ["trixel", "private", "privacy focused","environmental monitoring", "sensor network"]
+dependencies = [
+    'tomli; python_version < "3.11"',
+    'fastapi',
+    'packaging',
+]
+
+[project.urls]
+Homepage = "https://github.com/TillFleisch/TrixelManagementService"
+Repository = "https://github.com/TillFleisch/TrixelManagementService.git"
+Issues = "https://github.com/TillFleisch/TrixelManagementService/issues"

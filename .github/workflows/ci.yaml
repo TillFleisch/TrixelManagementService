@@ -1,0 +1,85 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  pre-commit:
+    name: Run pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - uses: pre-commit/action@v3.0.1
+
+  build_and_test_server:
+    needs: [pre-commit]
+    runs-on: ubuntu-latest
+    name: Build and test server
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - name: Install build, pytest
+        run: python -m pip install build pytest~=8.2
+
+      - name: Build server distributables
+        run: python -m build
+
+      - name: Install wheel for testing
+        run: pip install dist/*.whl --force-reinstall
+
+      - name: Test
+        run: python -m pytest
+
+      - uses: actions/upload-artifact@v4
+        with:
+          retention-days: 1
+          name: server-dist
+          path: ./dist/*
+
+  generate_and_build_client:
+    needs: [pre-commit, build_and_test_server]
+    runs-on: ubuntu-latest
+    name: Generate and build client module
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - name: Install build
+        run: python -m pip install build
+
+      - name: Download server distributable
+        uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Install server wheel
+        run: pip install dist/*.whl --force-reinstall
+
+      - name: Install requirements
+        working-directory: client_generator
+        run: pip install -r requirements.txt
+
+      - name: Generate client
+        working-directory: client_generator
+        run: python generate_client.py
+
+      - name: Build client distributables
+        working-directory: client_generator/trixelmanagementclient
+        run: python -m build
+
+      - name: Install client wheel
+        working-directory: client_generator/trixelmanagementclient
+        run: pip install dist/*.whl --force-reinstall

@@ -1,0 +1,130 @@
+name: CD
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  pre-commit:
+    name: Run pre-commit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - uses: pre-commit/action@v3.0.1
+
+  build_server_distributable:
+    needs: [pre-commit]
+    runs-on: ubuntu-latest
+    name: Build server distributables
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - name: Install build
+        run: python -m pip install build
+
+      - name: Build server
+        run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: server-dist
+          path: ./dist/*
+
+  generate_and_build_client:
+    needs: [pre-commit, build_server_distributable]
+    runs-on: ubuntu-latest
+    name: Generate and build client distributables
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11-dev"
+
+      - name: Download server distributable
+        uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Install build
+        run: python -m pip install build
+
+      - name: Install server dependency
+        run: pip install dist/*.whl --force-reinstall
+
+      - name: Install client requirements
+        working-directory: client_generator
+        run: pip install -r requirements.txt
+
+      - name: Generate client
+        working-directory: client_generator
+        run: python generate_client.py
+
+      - name: Build client distributables
+        working-directory: client_generator/trixelmanagementclient
+        run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-dist
+          path: ./client_generator/trixelmanagementclient/dist/*
+
+  build_and_push_server_image:
+    name: Build and publish server image
+    needs: [pre-commit, build_server_distributable]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download server distributable
+        uses: actions/download-artifact@v4
+        with:
+          name: server-dist
+          path: dist/
+          merge-multiple: true
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/trixelmanagementserver:latest,${{ secrets.DOCKERHUB_USERNAME }}/trixelmanagementserver:${{ github.event.release.tag_name }} # yamllint disable-line rule:line-length
+
+  publish-client-pypi:
+    needs: [generate_and_build_client, build_and_push_server_image]
+    name: Publish to PyPi
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - name: Download client distributable
+        uses: actions/download-artifact@v4
+        with:
+          name: client-dist
+          path: dist/
+          merge-multiple: true
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
