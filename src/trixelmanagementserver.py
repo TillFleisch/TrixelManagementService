@@ -1,14 +1,34 @@
 """Entry point for the Trixel Management Service API."""
 
+import asyncio
 import importlib
+import sys
+from contextlib import asynccontextmanager
 
 import packaging.version
 import uvicorn
 from fastapi import FastAPI
 
-from schema import Ping, Version
+from logging_helper import get_logger
+from schema import Config, Ping, TestConfig, Version
+from tls_manager import TLSManager
 
 api_version = importlib.metadata.version("trixelmanagementserver")
+if "pytest" in sys.modules:
+    config = TestConfig()
+else:
+    config = Config()
+tls_manger: TLSManager = TLSManager(config)
+logger = get_logger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan actions executed before and after FastAPI."""
+    asyncio.create_task(tls_manger.start())
+
+    yield
+
 
 app = FastAPI(
     title="Trixel Management Service",
@@ -18,6 +38,7 @@ app = FastAPI(
             """,
     version=api_version,
     root_path=f"/v{packaging.version.Version(api_version).major}",
+    lifespan=lifespan,
 )
 
 
@@ -39,6 +60,9 @@ def ping() -> Ping:
 def get_semantic_version() -> Version:
     """Get the precise version of the currently running API."""
     return Version(version=api_version)
+
+
+# TODO: add (authenticated) /delegations PUT endpoint for delegation updates from the TMS
 
 
 def main() -> None:

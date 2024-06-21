@@ -27,7 +27,7 @@ jobs:
           python-version: "3.11-dev"
 
       - name: Install build, pytest
-        run: python -m pip install build pytest~=8.2
+        run: python -m pip install build pytest~=8.2 pytest-asyncio==0.23.7 respx==0.21.1
 
       - name: Build server distributables
         run: python -m build

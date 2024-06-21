@@ -9,7 +9,7 @@ profile = "black"
 known_local_folder = ["src", "tests"]
 
 [project.optional-dependencies]
-dev = ["black", "isort", "pytest"]
+dev = ["black", "isort", "pytest", "pytest-asyncio", "respx"]
 
 [project]
 name = "trixelmanagementserver"
@@ -23,6 +23,10 @@ dependencies = [
     'tomli; python_version < "3.11"',
     'fastapi',
     'packaging',
+    'pydantic-settings',
+    'toml',
+    'trixellookupclient',
+    'colorlog',
 ]
 
 [project.urls]

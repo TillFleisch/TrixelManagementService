@@ -2,6 +2,7 @@
 
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import toml
@@ -9,7 +10,9 @@ from fastapi.openapi.utils import get_openapi
 from openapi_python_client import MetaType
 from openapi_python_client.cli import generate
 
-from trixelmanagementserver import app
+# Pytest import is mocked to trick the FastAPI app into loading the TestConfig instead of reading a file
+sys.modules["pytest"] = None
+from trixelmanagementserver import app  # noqa E402
 
 if __name__ == "__main__":
 
