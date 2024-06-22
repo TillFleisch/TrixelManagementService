@@ -4,16 +4,19 @@ import asyncio
 import importlib
 import sys
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 
 import packaging.version
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from starlette.responses import Response
 
 from logging_helper import get_logger
 from schema import Config, Ping, TestConfig, Version
 from tls_manager import TLSManager
 
 api_version = importlib.metadata.version("trixelmanagementserver")
+config: Config
 if "pytest" in sys.modules:
     config = TestConfig()
 else:
@@ -42,6 +45,12 @@ app = FastAPI(
 )
 
 
+def is_active() -> None:
+    """Dependency which restricts endpoints to only be available, if the TMS is enabled by the TLS."""
+    if not config.tms_config.active:
+        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="TMS not active!")
+
+
 @app.get(
     "/ping",
     name="Ping",
@@ -60,6 +69,21 @@ def ping() -> Ping:
 def get_semantic_version() -> Version:
     """Get the precise version of the currently running API."""
     return Version(version=api_version)
+
+
+@app.get(
+    "/active",
+    name="is_active",
+    summary="Get the active status of this TMS.",
+    responses={
+        200: {"content": None},
+        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
+    },
+    dependencies=[Depends(is_active)],
+)
+def get_active() -> Response:
+    """Get the active status of this TMS."""
+    return Response(status_code=HTTPStatus.OK)
 
 
 # TODO: add (authenticated) /delegations PUT endpoint for delegation updates from the TMS
