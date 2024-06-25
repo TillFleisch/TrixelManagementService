@@ -29,9 +29,9 @@ from trixellookupclient.models import (
 )
 from trixellookupclient.types import Response
 
+from config_schema import Config
 from exception import TLSCriticalError
 from logging_helper import get_logger
-from schema import Config
 
 api_version = importlib.metadata.version("trixellookupclient")
 logger = get_logger(__name__)

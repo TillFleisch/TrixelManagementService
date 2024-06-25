@@ -6,7 +6,7 @@ import sys
 import colorlog
 from colorlog import ColoredFormatter
 
-from schema import Config, TestConfig
+from config_schema import Config, TestConfig
 
 __log_level = logging.NOTSET
 if "pytest" in sys.modules:

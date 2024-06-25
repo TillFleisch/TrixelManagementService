@@ -10,8 +10,8 @@ import respx
 from httpx import ConnectError, Response
 from trixellookupclient.models.tms_delegation import TMSDelegation
 
+from config_schema import Config, TestConfig
 from exception import TLSCriticalError
-from schema import Config, TestConfig
 from tls_manager import TLSManager
 
 pytest_plugins = ("pytest_asyncio",)

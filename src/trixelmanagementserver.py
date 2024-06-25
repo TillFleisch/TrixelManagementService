@@ -11,8 +11,9 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from starlette.responses import Response
 
+from config_schema import Config, TestConfig
 from logging_helper import get_logger
-from schema import Config, Ping, TestConfig, Version
+from schema import Ping, Version
 from tls_manager import TLSManager
 
 api_version = importlib.metadata.version("trixelmanagementserver")
