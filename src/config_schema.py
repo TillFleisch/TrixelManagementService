@@ -2,9 +2,16 @@
 
 import logging
 from enum import IntEnum
-from typing import Any, Tuple, Type
+from typing import Any, Optional, Tuple, Type
 
-from pydantic import BaseModel, ConfigDict, Field, GetCoreSchemaHandler, SecretStr
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    GetCoreSchemaHandler,
+    SecretStr,
+    model_validator,
+)
 from pydantic_core import CoreSchema, core_schema
 from pydantic_settings import (
     BaseSettings,
@@ -48,6 +55,31 @@ class TLSConfig(BaseModel):
     use_ssl: bool = True
 
 
+class TMSDatabaseConfig(BaseModel):
+    """TMS Database related configurations."""
+
+    model_config = ConfigDict(validate_assignment=True)
+
+    custom_url: Optional[str] = None
+    dialect: Optional[str] = None
+    user: Optional[str] = None
+    password: Optional[SecretStr] = None
+    host: Optional[str] = None
+    port: Optional[int] = None
+    db_name: Optional[str] = None
+
+    @model_validator(mode="before")
+    def validate_mutual_exlusion(data: Any) -> Any:
+        """Validate that custom_url is mutually exclusive with all other options."""
+        attributes = ["dialect", "user", "password", "host", "db_name", "port"]
+
+        for attribute in attributes:
+            if data.get(attribute, None) is not None and data.get("custom_url", None):
+                raise ValueError(f"Config: '{attribute}' and 'custom_url' mutually exclude each other.")
+
+        return data
+
+
 class TMSConfig(BaseModel):
     """TMS related configurations."""
 
@@ -58,6 +90,7 @@ class TMSConfig(BaseModel):
     host: str
     api_token: SecretStr | None = Field(None)
     delegations: list[TMSDelegation] = Field(list())
+    database: Optional[TMSDatabaseConfig] = None
 
 
 class Config(BaseSettings):

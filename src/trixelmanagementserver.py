@@ -11,7 +11,10 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from starlette.responses import Response
 
+import model
 from config_schema import Config, TestConfig
+from crud import init_measurement_type_enum
+from database import engine, get_db
 from logging_helper import get_logger
 from schema import Ping, Version
 from tls_manager import TLSManager
@@ -22,6 +25,9 @@ if "pytest" in sys.modules:
     config = TestConfig()
 else:
     config = Config()
+
+model.Base.metadata.create_all(bind=engine)
+
 tls_manger: TLSManager = TLSManager(config)
 logger = get_logger(__name__)
 
@@ -29,8 +35,8 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan actions executed before and after FastAPI."""
+    init_measurement_type_enum(next(get_db()))
     asyncio.create_task(tls_manger.start())
-
     yield
 
 

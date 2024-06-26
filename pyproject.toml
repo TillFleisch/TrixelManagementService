@@ -27,6 +27,9 @@ dependencies = [
     'toml',
     'trixellookupclient',
     'colorlog',
+    'SQLAlchemy',
+    'sqlalchemy-timescaledb',
+    'pynyhtm'
 ]
 
 [project.urls]
