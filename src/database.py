@@ -1,17 +1,13 @@
 """Database and session preset configuration."""
 
-import sys
 from pathlib import Path
 
 from sqlalchemy import URL, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 
-from config_schema import Config, TestConfig
+from config_schema import Config, GlobalConfig
 
-if "pytest" in sys.modules:
-    config = TestConfig()
-else:
-    config = Config()
+config: Config = GlobalConfig.config
 
 DATABASE_URL = None
 

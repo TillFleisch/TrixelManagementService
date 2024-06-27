@@ -1,11 +1,13 @@
 """Global tests for the Trixel Management Server app."""
 
+import pytest
 from conftest import client
 from sqlalchemy.orm import Session
 
 import model
 
 
+@pytest.mark.order(100)
 def test_ping():
     """Test ping endpoint."""
     response = client.get("/ping")
@@ -13,6 +15,7 @@ def test_ping():
     assert response.json() == {"ping": "pong"}
 
 
+@pytest.mark.order(100)
 def test_version():
     """Test version endpoint."""
     response = client.get("/version")
@@ -20,6 +23,7 @@ def test_version():
     assert "version" in response.json()
 
 
+@pytest.mark.order(100)
 def test_measurement_type_enums(empty_db: Session):
     """Test if the measurement enum relation contains entries."""
     types = empty_db.query(model.MeasurementType.name).all()

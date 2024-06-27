@@ -1,6 +1,7 @@
 """Pydantic schemata related to the TMS configuration file."""
 
 import logging
+import sys
 from enum import IntEnum
 from typing import Any, Optional, Tuple, Type
 
@@ -121,3 +122,24 @@ class TestConfig(Config):
     model_config = SettingsConfigDict(toml_file=None)
     tls_config: TLSConfig = TLSConfig(host="sausage.dog.local")
     tms_config: TMSConfig = TMSConfig(host="wiener.dog.local")
+
+
+class GlobalConfig:
+    """Class which hold the global configuration reference."""
+
+    config: Config = None
+
+    def __init__(self):
+        """
+        Initialize the global config reference.
+
+        When pytest is loaded, a mock test-config will be loaded instead of the user-defined configuration.
+        """
+        if GlobalConfig.config is None:
+            if "pytest" in sys.modules:
+                GlobalConfig.config = TestConfig()
+            else:
+                GlobalConfig.config = Config()
+
+
+GlobalConfig()

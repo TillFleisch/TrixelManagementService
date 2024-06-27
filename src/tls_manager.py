@@ -29,7 +29,7 @@ from trixellookupclient.models import (
 )
 from trixellookupclient.types import Response
 
-from config_schema import Config
+from config_schema import Config, GlobalConfig
 from exception import TLSCriticalError
 from logging_helper import get_logger
 
@@ -57,16 +57,16 @@ def update_config_file(config: Config):
 class TLSManager:
     """Wrapping class responsible for TLS related communication."""
 
-    def __init__(self, config: Config):
+    def __init__(self):
         """Initialize the TLSManager with a trixellookupclient."""
-        self.config = config
+        self.config: Config = GlobalConfig.config
 
         # Assume the TMS is deactivated until synchronized with the TLS.
         self.config.tms_config.active = False
 
-        secure = "" if config.tls_config.use_ssl is False else "s"
+        secure = "" if self.config.tls_config.use_ssl is False else "s"
         self.tls_client = Client(
-            base_url=f"http{secure}://{config.tls_config.host}/v{packaging.version.Version(api_version).major}/"
+            base_url=f"http{secure}://{self.config.tls_config.host}/v{packaging.version.Version(api_version).major}/"
         )
 
     async def start(self):

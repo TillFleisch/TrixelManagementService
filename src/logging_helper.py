@@ -1,18 +1,13 @@
 """Logging helper which provides a logger with custom formatting and user-defined log-level."""
 
 import logging
-import sys
 
 import colorlog
 from colorlog import ColoredFormatter
 
-from config_schema import Config, TestConfig
+from config_schema import GlobalConfig
 
-__log_level = logging.NOTSET
-if "pytest" in sys.modules:
-    __log_level = TestConfig().log_level
-else:
-    __log_level = Config().log_level
+__log_level = GlobalConfig.config.log_level
 
 
 formatter = ColoredFormatter(

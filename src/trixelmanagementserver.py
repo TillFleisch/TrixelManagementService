@@ -2,34 +2,36 @@
 
 import asyncio
 import importlib
-import sys
 from contextlib import asynccontextmanager
 from http import HTTPStatus
 
 import packaging.version
 import uvicorn
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI
 from starlette.responses import Response
 
 import model
-from config_schema import Config, TestConfig
+from common import is_active
+from config_schema import Config, GlobalConfig
 from crud import init_measurement_type_enum
 from database import engine, get_db
 from logging_helper import get_logger
+from measurement_station.measurement_station import TAG_MEASUREMENT_STATION
+from measurement_station.measurement_station import router as measurement_station_router
 from schema import Ping, Version
 from tls_manager import TLSManager
 
 api_version = importlib.metadata.version("trixelmanagementserver")
-config: Config
-if "pytest" in sys.modules:
-    config = TestConfig()
-else:
-    config = Config()
+config: Config = GlobalConfig.config
 
 model.Base.metadata.create_all(bind=engine)
 
-tls_manger: TLSManager = TLSManager(config)
+tls_manger: TLSManager = TLSManager()
 logger = get_logger(__name__)
+
+openapi_tags = [
+    {"name": TAG_MEASUREMENT_STATION},
+]
 
 
 @asynccontextmanager
@@ -48,14 +50,10 @@ app = FastAPI(
             """,
     version=api_version,
     root_path=f"/v{packaging.version.Version(api_version).major}",
+    openapi_tags=openapi_tags,
     lifespan=lifespan,
 )
-
-
-def is_active() -> None:
-    """Dependency which restricts endpoints to only be available, if the TMS is enabled by the TLS."""
-    if not config.tms_config.active:
-        raise HTTPException(status_code=HTTPStatus.SERVICE_UNAVAILABLE, detail="TMS not active!")
+app.include_router(measurement_station_router)
 
 
 @app.get(
