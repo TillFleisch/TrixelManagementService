@@ -68,6 +68,7 @@ class TMSDatabaseConfig(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = None
     db_name: Optional[str] = None
+    use_sqlite: bool = False
 
     @model_validator(mode="before")
     def validate_mutual_exlusion(data: Any) -> Any:
@@ -121,7 +122,7 @@ class TestConfig(Config):
     __test__ = False
     model_config = SettingsConfigDict(toml_file=None)
     tls_config: TLSConfig = TLSConfig(host="sausage.dog.local")
-    tms_config: TMSConfig = TMSConfig(host="wiener.dog.local")
+    tms_config: TMSConfig = TMSConfig(host="wiener.dog.local", database=TMSDatabaseConfig(use_sqlite=True))
 
 
 class GlobalConfig:

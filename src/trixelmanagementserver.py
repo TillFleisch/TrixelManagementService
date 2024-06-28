@@ -82,7 +82,7 @@ def get_semantic_version() -> Version:
     summary="Get the active status of this TMS.",
     responses={
         200: {"content": None},
-        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
     },
     dependencies=[Depends(is_active)],
 )

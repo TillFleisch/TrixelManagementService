@@ -34,5 +34,5 @@ class MeasurementType(Base):
 
     __tablename__ = "measurement_type"
 
-    id = Column(Integer, unique=True, primary_key=True, nullable=False)
+    id = Column(Integer, unique=True, primary_key=True, nullable=False, index=True)
     name = Column(String(32), unique=True, nullable=False)

@@ -5,12 +5,13 @@ from http import HTTPStatus
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
-from pydantic import UUID4, PositiveInt
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from pydantic import UUID4, NonNegativeInt, PositiveFloat, PositiveInt
 from sqlalchemy.orm import Session
 
 from common import is_active
 from database import get_db
+from model import MeasurementTypeEnum
 
 from . import crud, schema
 
@@ -44,7 +45,7 @@ def verify_ms_token(
     summary="Register a new measurement station.",
     tags=[TAG_MEASUREMENT_STATION],
     responses={
-        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
     },
     status_code=HTTPStatus.CREATED,
     dependencies=[Depends(is_active)],
@@ -76,10 +77,11 @@ def post_measurement_station(
 
 @router.put(
     "/measurement_station",
-    name="Update measurement station properties",
+    name="Add Measurement Station",
+    summary="Update measurement station properties.",
     tags=[TAG_MEASUREMENT_STATION],
     responses={
-        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
         401: {
             "content": {
                 "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
@@ -104,15 +106,17 @@ def put_measurement_station(
 
 @router.delete(
     "/measurement_station",
-    name="Delete an existing measurement station",
+    name="Delete Measurement Station",
+    summary="Delete an existing measurement station.",
     tags=[TAG_MEASUREMENT_STATION],
     responses={
-        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
         401: {
             "content": {
                 "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
             }
         },
+        404: {"content": {"application/json": {"example": {"detail": "Measurement station does not exist!"}}}},
     },
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.NO_CONTENT,
@@ -122,18 +126,22 @@ def delete_measurement_station(
     db: Session = Depends(get_db),
 ):
     """Delete an existing measurement station from the DB."""
-    if crud.delete_measurement_station(db, ms_uuid):
-        return
+    try:
+        if crud.delete_measurement_station(db, ms_uuid):
+            return
+    except ValueError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Measurement station does not exist!")
     raise HTTPException(HTTPStatus.INTERNAL_SERVER_ERROR)
 
 
 @router.get(
     "/measurement_stations",
-    name="Get the number of measurement station registered at this TMS",
+    name="Get Measurement Station Count",
+    summary="Get the number of measurement station registered at this TMS.",
     tags=[TAG_MEASUREMENT_STATION],
     responses={
-        503: {"content": {"application/json": {"detail": "TMS not active!"}}},
-        200: {"content": {"application/json": {"value": 0}}},
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        200: {"content": {"application/json": {"example": {"value": 0}}}},
     },
     dependencies=[Depends(is_active)],
 )
@@ -143,3 +151,113 @@ def get_measurement_station_count(
 ):
     """Get the current number of registered measurement stations."""
     return {"value": crud.get_measurement_station_count(db, active=active)}
+
+
+@router.post(
+    "/measurement_station/sensor",
+    name="Add Sensor To Measurement Station",
+    summary="Add a new sensor to an existing measurement station.",
+    tags=[TAG_MEASUREMENT_STATION],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+    },
+    dependencies=[Depends(is_active)],
+)
+def post_sensor(
+    type: Annotated[MeasurementTypeEnum, Query(description="Type of measurement acquired by this sensor.")],
+    accuracy: Annotated[
+        PositiveFloat | None, Query(description="Accuracy of the sensor (true observation within +/- accuracy).")
+    ] = None,
+    sensor_name: Annotated[str | None, Query(description="Name of the sensor which takes measurements.")] = None,
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+) -> schema.SensorDetailed:
+    """Create a new sensor for a measurement station."""
+    return crud.create_sensor(db, ms_uuid=ms_uuid, type_=type, accuracy=accuracy, sensor_name=sensor_name)
+
+
+@router.get(
+    "/measurement_station/sensors",
+    name="Get Sensors For Measurement Station",
+    summary="Get a list of all registered sensors and their details for the measurement station.",
+    tags=[TAG_MEASUREMENT_STATION],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+    },
+    dependencies=[Depends(is_active)],
+)
+def get_sensors(
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+) -> list[schema.SensorDetailed]:
+    """Get a list of sensors which are registered for a measurement station."""
+    return crud.get_sensors(db, ms_uuid=ms_uuid)
+
+
+@router.delete(
+    "/measurement_station/sensor/{sensor_id}",
+    name="Delete Sensor From Measurement Station",
+    summary="Delete an existing sensor from a measurement station.",
+    tags=[TAG_MEASUREMENT_STATION],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+        404: {"content": {"application/json": {"example": {"detail": "Sensor with the given ID does not exist!"}}}},
+    },
+    dependencies=[Depends(is_active)],
+    status_code=HTTPStatus.NO_CONTENT,
+)
+def delete_sensor(
+    sensor_id: Annotated[NonNegativeInt, Path(description="ID of the sensor which should be removed.")],
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+):
+    """Delete a sensor form a measurement station."""
+    try:
+        if crud.delete_sensor(db, ms_uuid=ms_uuid, sensor_id=sensor_id):
+            return
+    except ValueError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
+    raise HTTPException(HTTPStatus.INTERNAL_SERVER_ERROR)
+
+
+@router.get(
+    "/measurement_station/sensor/{sensor_id}",
+    name="Get Sensor Detail For Measurement Station",
+    summary="Get details for a registered sensor.",
+    tags=[TAG_MEASUREMENT_STATION],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+        404: {"content": {"application/json": {"example": {"detail": "Sensor with the given ID does not exist!"}}}},
+    },
+    dependencies=[Depends(is_active)],
+)
+def get_sensor(
+    sensor_id: Annotated[NonNegativeInt, Path(description="ID of the sensor for which details are retrieved.")],
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+) -> schema.SensorDetailed:
+    """Get details about a specific sensor for a measurement station."""
+    try:
+        return crud.get_sensors(db, ms_uuid=ms_uuid, sensor_id=sensor_id)[0]
+    except ValueError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")

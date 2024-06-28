@@ -21,20 +21,28 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+def override_get_db():
+    """Override the default database session retrieval with the test environment db."""
+    try:
+        db = TestingSessionLocal()
+        yield db
+    finally:
+        db.close()
+
+
+@pytest.fixture(scope="function", name="db")
+def get_db_session():
+    """Get a database session which can be used in tests."""
+    return next(override_get_db())
+
 
 def prepare_db():
     """Set up empty temporary test database."""
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-    def override_get_db():
-        """Override the default database session retrieval with the test environment db."""
-        try:
-            db = TestingSessionLocal()
-            yield db
-        finally:
-            db.close()
 
     app.dependency_overrides[get_db] = override_get_db
     init_measurement_type_enum(next(override_get_db()))
