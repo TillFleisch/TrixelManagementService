@@ -6,18 +6,23 @@ from typing import Annotated
 
 import jwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi.responses import JSONResponse
 from pydantic import UUID4, NonNegativeInt, PositiveFloat, PositiveInt
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from common import is_active
+from common import is_active, is_delegated
+from config_schema import Config, GlobalConfig
 from database import get_db
 from model import MeasurementTypeEnum
 
 from . import crud, schema
 
 TAG_MEASUREMENT_STATION = "Measurement Station"
+TAG_TRIXELS = "Trixels"
 
-router = APIRouter(tags=[TAG_MEASUREMENT_STATION])
+router = APIRouter()
+config: Config = GlobalConfig.config
 
 
 def verify_ms_token(
@@ -261,3 +266,122 @@ def get_sensor(
         return crud.get_sensors(db, ms_uuid=ms_uuid, sensor_id=sensor_id)[0]
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
+
+
+def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpdate) -> None | JSONResponse:
+    """
+    Process incoming sensor updates by storing them to the DB and invoking the privatizer.
+
+    :param ms_uuid: The measurement station which took the measurements
+    :param updates: The updated values in combination with the trixel IDs to which they belong
+    :raises HTTPException: on invalid input
+    :return: None or JSONResponse if the client should adjust settings
+    """
+    # TODO: optional - ascertain that all trixels have the same parent - should not be possible if clients are behaving
+
+    invalid_trixels = set()
+    for trixel in updates.keys():
+        if not is_delegated(trixel):
+            invalid_trixels.add(trixel)
+
+    # Remove invalid trixels for further processing
+    for trixel in invalid_trixels:
+        updates.pop(trixel)
+
+    try:
+        crud.insert_sensor_updates(db, ms_uuid=ms_uuid, updates=updates)
+        # TODO: add purge job for old data - keep statistics
+
+        # TODO: process via privatizer, call privatizer update/callback
+
+        # TODO: use 303 redirect if a different trixel id should be used according to k requirement
+    except ValueError as e:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(HTTPStatus.BAD_REQUEST, "Timestamps must be unique!")
+
+    if len(invalid_trixels) != 0:
+        return JSONResponse(
+            status_code=HTTPStatus.SEE_OTHER,
+            content={"detail": "Trixel not managed by this TMS!", "trixel_ids": list(invalid_trixels)},
+        )
+
+
+# TODO: add endpoint(s) for (partial) measurement station migration to different TMS
+# (in case Topology changes or a TMS is not responsible for sub-pixels)
+# (partial meaning that only some sensors are transferred - clients also need to support this)
+
+
+@router.put(
+    "/trixel/{trixel_id}/update/{sensor_id}",
+    name="Publish Single Sensor Value",
+    summary="Publish a single sensor value update to the TMS.",
+    tags=[TAG_TRIXELS],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+        404: {"content": {"application/json": {"example": {"detail": "Sensor with the given ID does not exist!"}}}},
+        400: {"content": {"application/json": {"example": {"detail": "Invalid sensors provided: {0, 1}"}}}},
+        303: {
+            "content": {
+                "application/json": {"example": {"detail": "Trixel not managed by this TMS!", "trixel_ids": [8, 9]}}
+            }
+        },
+    },
+    dependencies=[Depends(is_active)],
+    status_code=HTTPStatus.OK,
+)
+def put_sensor_update(
+    trixel_id: Annotated[schema.TrixelID, Path(description="The Trixel to which the sensor contributes.")],
+    sensor_id: Annotated[
+        NonNegativeInt,
+        Path(description="The ID of the sensor which took the measurement."),
+    ],
+    value: Annotated[float, Query(description="The updated measurement value.")],
+    timestamp: Annotated[
+        datetime | NonNegativeInt, Query(description="Point in time at which the measurement was taken (unix time).")
+    ],
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+):
+    """Publish a single sensor value update to the TMS which is stored and processed within the desired trixel."""
+    measurement = schema.Measurement(sensor_id=sensor_id, value=value, timestamp=timestamp)
+    batch_update: schema.BatchUpdate = {trixel_id: [measurement]}
+
+    return store_and_process_updates(db, ms_uuid, batch_update)
+
+
+@router.put(
+    "/trixel/update",
+    name="Publish Sensor Updates To Trixels",
+    summary="Publish multiple sensor updates to the TMS.",
+    tags=[TAG_TRIXELS],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+        404: {"content": {"application/json": {"example": {"detail": "Sensor with the given ID does not exist!"}}}},
+        400: {"content": {"application/json": {"example": {"detail": "Invalid sensors provided: {0, 1}"}}}},
+        303: {
+            "content": {
+                "application/json": {"example": {"detail": "Trixel not managed by this TMS!", "trixel_ids": [8, 9]}}
+            }
+        },
+    },
+    dependencies=[Depends(is_active)],
+    status_code=HTTPStatus.OK,
+)
+def put_sensor_batch_update(
+    updates: schema.BatchUpdate,
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+):
+    """Publish multiple sensor updates to the TMS which are stored and processed within the desired trixels."""
+    return store_and_process_updates(db, ms_uuid, updates)

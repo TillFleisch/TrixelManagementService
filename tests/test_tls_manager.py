@@ -21,10 +21,10 @@ tls_prefix = f"https://{TestConfig().tls_config.host}/v{packaging.version.Versio
 
 
 @pytest.mark.order(200)
-def test_read_config(config: Config):
+def test_read_config(new_config: Config):
     """Test that the test configuration was loaded correctly."""
-    assert config.tls_config.host == "sausage.dog.local"
-    assert config.tms_config.host == "wiener.dog.local"
+    assert new_config.tls_config.host == "sausage.dog.local"
+    assert new_config.tms_config.host == "wiener.dog.local"
 
 
 @pytest.mark.asyncio

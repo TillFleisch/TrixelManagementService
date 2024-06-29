@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from trixellookupclient.models.tms_delegation import TMSDelegation
 
 from config_schema import Config, GlobalConfig, TestConfig
 from crud import init_measurement_type_enum
@@ -58,13 +59,19 @@ def empty_db():
 
 @pytest.fixture(scope="function", name="config")
 def get_config() -> Config:
-    """Fixture which returns the test configuration."""
+    """Fixture which returns a reference to the config."""
+    return GlobalConfig.config
+
+
+@pytest.fixture(scope="function", name="new_config")
+def get_new_config() -> Config:
+    """Fixture which returns a new test configuration."""
     GlobalConfig.config = TestConfig()
     return GlobalConfig.config
 
 
 @pytest.fixture(scope="function")
-def new_tls_manager(config: Config) -> TLSManager:
+def new_tls_manager(new_config: Config) -> TLSManager:
     """Fixture which returns a new TLSManager which has not been "registered" at the TLS."""
     return TLSManager()
 
@@ -75,6 +82,11 @@ def preset_tls_manager(new_tls_manager: TLSManager) -> TLSManager:
     new_tls_manager.config.tms_config.id = 1
     new_tls_manager.config.tms_config.active = True
     new_tls_manager.config.tms_config.api_token = "Token"
+    new_tls_manager.config.tms_config.delegations = list()
+
+    # Mock delegation of root nodes
+    for i in range(8, 16):
+        new_tls_manager.config.tms_config.delegations.append(TMSDelegation(tms_id=1, trixel_id=i, exclude=False))
 
     return new_tls_manager
 

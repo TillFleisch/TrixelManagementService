@@ -5,13 +5,13 @@ from secrets import token_bytes
 
 import jwt
 from pydantic import UUID4, PositiveFloat, PositiveInt
-from sqlalchemy import delete, func, update
+from sqlalchemy import delete, func, or_, update
 from sqlalchemy.orm import Session
 
 from database import except_columns
 from model import MeasurementTypeEnum
 
-from . import model
+from . import model, schema
 
 
 def verify_ms_token(db: Session, jwt_token: bytes) -> UUID4:
@@ -216,3 +216,39 @@ def get_sensors(db: Session, ms_uuid: UUID4, sensor_id: int | None = None) -> li
         stmt = stmt.where(model.Sensor.id == sensor_id)
 
     return stmt.all()
+
+
+def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpdate):
+    """
+    Add multiple measurements for different sensors to a measurement station within the DB.
+
+    :param ms_uuid: the measurement station for which updates are provided
+    :param update: sensor updates
+    :raises ValueError: if at least one of the measurement stations does not exist
+    :raises ValueError: if multiple updates are included for a single sensor
+    """
+    sensor_ids = list()
+    clauses = list()
+    for measurements in updates.values():
+        for measurement in measurements:
+            clauses.append(model.Sensor.id == measurement.sensor_id)
+            sensor_ids.append(measurement.sensor_id)
+
+            new_sensor_measurement: model.SensorMeasurement = model.SensorMeasurement(
+                time=measurement.timestamp,
+                measurement_station_uuid=ms_uuid,
+                sensor_id=measurement.sensor_id,
+                value=measurement.value,
+            )
+            db.add(new_sensor_measurement)
+
+    stmt = db.query(model.Sensor.id).where(model.Sensor.measurement_station_uuid == ms_uuid).where(or_(False, *clauses))
+    valid_sensors = set([x[0] for x in stmt.all()])
+
+    if len(invalid_sensors := set(sensor_ids) - valid_sensors) > 0:
+        raise ValueError(f"Invalid sensors provided: {invalid_sensors}")
+
+    if len(sensor_ids) != len(set(sensor_ids)):
+        raise ValueError("Only one update per sensor allowed!")
+
+    db.commit()

@@ -1,10 +1,14 @@
 """Measurement station and related pydantic schemas."""
 
+from datetime import datetime
+from typing import Annotated
+
 from pydantic import (
     UUID4,
     BaseModel,
     ConfigDict,
     Field,
+    NonNegativeInt,
     PositiveFloat,
     PositiveInt,
     SecretStr,
@@ -13,6 +17,7 @@ from pydantic import (
 )
 
 from model import MeasurementTypeEnum
+from schema import TrixelID
 
 
 class MeasurementStationBase(BaseModel):
@@ -74,3 +79,30 @@ class SensorDetailed(SensorBase):
     model_config = ConfigDict(from_attributes=True)
 
     details: SensorDetails
+
+
+class Measurement(BaseModel):
+    """Schema which describes a single measurement performed by sensor within a measurement station."""
+
+    # Timestamps to be provided in unix-time
+    timestamp: Annotated[datetime, Field(description="Point in time at which the measurement was taken (unix time).")]
+    sensor_id: Annotated[
+        NonNegativeInt,
+        Field(description="The ID of the sensor which took the measurement."),
+    ]
+    value: Annotated[float, Field(description="The updated measurement value.")]
+
+    # TODO: assert timestamp is "reasonable" - not far in the past/future
+    # TODO: consider adding a heartbeat option per sensor to prevent value re-transmission
+
+
+BatchUpdate = Annotated[
+    dict[
+        Annotated[
+            TrixelID,
+            Field(description="The ID of the Trixel to which sensors should contribute."),
+        ],
+        Annotated[list[Measurement], Field(description="Set of measurements performed by the measurements station.")],
+    ],
+    Field(description="A dictionary where for each trixel, sensors with their updated measurements are described."),
+]

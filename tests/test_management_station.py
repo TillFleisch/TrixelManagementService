@@ -1,6 +1,7 @@
 """Tests related to management station endpoints."""
 
 import uuid
+from datetime import datetime
 from http import HTTPStatus
 from typing import Callable
 from urllib.parse import urlencode
@@ -9,8 +10,10 @@ import jwt
 import pytest
 from conftest import client
 from sqlalchemy.orm import Session
+from trixellookupclient.models.tms_delegation import TMSDelegation
 
 import measurement_station.model as ms_model
+from config_schema import Config
 from tls_manager import TLSManager
 
 pytest.ms_token = None
@@ -124,7 +127,67 @@ def test_delete_sensor():
 
 
 @pytest.mark.order(308)
-def test_ms_delete(db: Session):
+@pytest.mark.parametrize("trixel_id", {8, 9, 15, 35})
+def test_sensor_put(trixel_id: int):
+    """Happy path for putting a single update."""
+    # Trixel id is subtracted from time to prevent duplicate timestamps for the same sensors
+    response = client.put(
+        f"/trixel/{trixel_id}/update/1?value=1.1&timestamp={int(datetime.now().timestamp()-trixel_id)}",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code == HTTPStatus.OK, response.text
+
+
+@pytest.mark.order(308)
+def test_sensor_put_update_invalid_time():
+    """Test repeated value insertion."""
+    response = client.put(
+        "/trixel/8/update/1?value=1.1&timestamp=0",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code == HTTPStatus.OK, response.text
+
+    response = client.put(
+        "/trixel/8/update/1?value=1.1&timestamp=0",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code == HTTPStatus.BAD_REQUEST, response.text
+
+
+@pytest.mark.order(308)
+def test_sensor_put_invalid_trixel_id():
+    """Test putting an update to an invalid trixel id."""
+    response = client.put(
+        "/trixel/16/update/1?value=1.1&timestamp=1",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code != HTTPStatus.OK, response.text
+
+
+@pytest.mark.order(309)
+def test_sensor_put_non_delegated_trixel_id(config: Config):
+    """Test sensor update to trixel which is not delegated to the TMS."""
+    config.tms_config.delegations.append(TMSDelegation(tms_id=1, trixel_id=35, exclude=True))
+    response = client.put(
+        "/trixel/35/update/1?value=1.1&timestamp=2",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code == HTTPStatus.SEE_OTHER, response.text
+
+
+@pytest.mark.order(310)
+def test_sensor_put_non_delegated_trixel_id_root(config: Config):
+    """Test sensor update to trixel which is not delegated to the TMS."""
+    config.tms_config.delegations = list()
+    response = client.put(
+        "/trixel/8/update/0?value=2&timestamp=0",
+        headers={"token": pytest.ms_token},
+    )
+    assert response.status_code == HTTPStatus.SEE_OTHER, response.text
+
+
+@pytest.mark.order(311)
+def test_ms_delete(db: Session, preset_tls_manager: TLSManager):
     """Happy path for removing a measurement station."""
     response = client.delete("/measurement_station", headers={"token": pytest.ms_token})
     assert response.status_code == HTTPStatus.NO_CONTENT, response.text
@@ -141,6 +204,16 @@ def test_ms_delete(db: Session):
     sensor_count = db.query(ms_model.Sensor).where(ms_model.Sensor.measurement_station_uuid == ms_uuid).count()
     assert sensor_count == 0
 
+    ms_uuid = uuid.UUID(
+        hex=jwt.decode(pytest.ms_token, options={"verify_signature": False}, algorithms=["HS256"])["ms_uuid"]
+    )
+    sensor_count = (
+        db.query(ms_model.SensorMeasurement)
+        .where(ms_model.SensorMeasurement.measurement_station_uuid == ms_uuid)
+        .count()
+    )
+    assert sensor_count == 0
+
 
 @pytest.mark.order(301)
 @pytest.mark.parametrize(
@@ -148,6 +221,11 @@ def test_ms_delete(db: Session):
     {
         (client.put, "/measurement_station"),
         (client.delete, "/measurement_station"),
+        (client.post, "/measurement_station/sensor"),
+        (client.delete, "/measurement_station/sensor/0"),
+        (client.get, "/measurement_station/sensor/0"),
+        (client.put, "/trixel/1/update/0"),
+        (client.put, "/trixel/update"),
     },
 )
 def test_endpoints_invalid_token(method: Callable, endpoint: str):
@@ -163,6 +241,12 @@ def test_endpoints_invalid_token(method: Callable, endpoint: str):
         (client.post, "/measurement_station"),
         (client.put, "/measurement_station"),
         (client.delete, "/measurement_station"),
+        (client.get, "/measurement_station/sensors"),
+        (client.post, "/measurement_station/sensor"),
+        (client.delete, "/measurement_station/sensor/0"),
+        (client.get, "/measurement_station/sensor/0"),
+        (client.put, "/trixel/1/update/0"),
+        (client.put, "/trixel/update"),
     },
 )
 def test_add_ms_inactive(method: Callable, endpoint: str, empty_db, new_tls_manager: TLSManager):
