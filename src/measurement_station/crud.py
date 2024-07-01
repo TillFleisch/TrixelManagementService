@@ -6,7 +6,7 @@ from secrets import token_bytes
 
 import jwt
 from pydantic import UUID4, PositiveFloat, PositiveInt
-from sqlalchemy import delete, func, or_, update
+from sqlalchemy import delete, or_, update
 from sqlalchemy.orm import Session
 
 from database import except_columns
@@ -149,13 +149,13 @@ def create_sensor(
     :param name: The name of the sensor which takes measurements
     :return: newly created sensor
     """
-    new_sensor_id = (
-        db.query(func.max(model.Sensor.id)).where(model.Sensor.measurement_station_uuid == ms_uuid).first()[0]
+    stmt = (
+        update(model.MeasurementStation)
+        .where(model.MeasurementStation.uuid == ms_uuid)
+        .values(sensor_index=model.MeasurementStation.sensor_index + 1)
+        .returning(model.MeasurementStation.sensor_index)
     )
-    if new_sensor_id is None:
-        new_sensor_id = 0
-    else:
-        new_sensor_id = new_sensor_id + 1
+    sensor_id = db.execute(stmt).one()[0]
 
     # use existing sensor details or add new entry
     existing_detail_id = (
@@ -174,7 +174,7 @@ def create_sensor(
         existing_detail_id = sensor_details.id
 
     sensor = model.Sensor(
-        id=new_sensor_id,
+        id=sensor_id - 1,
         measurement_station_uuid=ms_uuid,
         measurement_type=type_.get_id(),
         sensor_detail_id=existing_detail_id,

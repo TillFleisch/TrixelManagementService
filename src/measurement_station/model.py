@@ -31,6 +31,7 @@ class MeasurementStation(Base):
     token_secret = Column(LargeBinary(256))
     k_requirement = Column(Integer, nullable=False)
     active = Column(Boolean, default=True, nullable=False)
+    sensor_index = Column(Integer, default=0, nullable=False)
 
     sensors = relationship("Sensor", back_populates="measurement_station")
 
