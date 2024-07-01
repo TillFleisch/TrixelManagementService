@@ -85,7 +85,9 @@ class Measurement(BaseModel):
     """Schema which describes a single measurement performed by sensor within a measurement station."""
 
     # Timestamps to be provided in unix-time
-    timestamp: Annotated[datetime, Field(description="Point in time at which the measurement was taken (unix time).")]
+    timestamp: Annotated[
+        datetime | PositiveInt, Field(description="Point in time at which the measurement was taken (unix time).")
+    ]
     sensor_id: Annotated[
         NonNegativeInt,
         Field(description="The ID of the sensor which took the measurement."),

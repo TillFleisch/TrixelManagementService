@@ -140,6 +140,29 @@ def delete_measurement_station(
 
 
 @router.get(
+    "/measurement_station",
+    name="Get Measurement Station Detail",
+    summary="Get details about own measurement station.",
+    tags=[TAG_MEASUREMENT_STATION],
+    responses={
+        503: {"content": {"application/json": {"example": {"detail": "TMS not active!"}}}},
+        401: {
+            "content": {
+                "application/json": {"example": {"detail": "Invalid measurement station authentication token!"}}
+            }
+        },
+    },
+    dependencies=[Depends(is_active)],
+)
+def get_measurement_station_detail(
+    ms_uuid: UUID4 = Depends(verify_ms_token),
+    db: Session = Depends(get_db),
+) -> schema.MeasurementStation:
+    """Delete an existing measurement station from the DB."""
+    return crud.get_measurement_station(db, ms_uuid)
+
+
+@router.get(
     "/measurement_stations",
     name="Get Measurement Station Count",
     summary="Get the number of measurement station registered at this TMS.",
@@ -172,6 +195,7 @@ def get_measurement_station_count(
         },
     },
     dependencies=[Depends(is_active)],
+    status_code=HTTPStatus.CREATED,
 )
 def post_sensor(
     type: Annotated[MeasurementTypeEnum, Query(description="Type of measurement acquired by this sensor.")],

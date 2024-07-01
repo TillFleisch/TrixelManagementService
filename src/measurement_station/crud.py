@@ -1,6 +1,7 @@
 """Measurement station and related database wrappers."""
 
 import uuid
+from datetime import datetime
 from secrets import token_bytes
 
 import jwt
@@ -103,6 +104,20 @@ def delete_measurement_station(db: Session, uuid_: UUID4) -> bool:
         .where(model.MeasurementStation.uuid == uuid_)
         .first()
     ) is None
+
+
+def get_measurement_station(db: Session, uuid_: UUID4) -> model.MeasurementStation.active:
+    """
+    Get details about a measurement station.
+
+    :param: The UUID of the measurement station for which details are retrieved
+    :return: Details about the measurement station.
+    """
+    return (
+        db.query(*except_columns(model.MeasurementStation, "token_secret"))
+        .where(model.MeasurementStation.uuid == uuid_)
+        .one()
+    )
 
 
 def get_measurement_station_count(db: Session, active: bool | None = None) -> int:
@@ -235,7 +250,11 @@ def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpda
             sensor_ids.append(measurement.sensor_id)
 
             new_sensor_measurement: model.SensorMeasurement = model.SensorMeasurement(
-                time=measurement.timestamp,
+                time=(
+                    measurement.timestamp
+                    if isinstance(measurement.timestamp, datetime)
+                    else datetime.fromtimestamp(measurement.timestamp)
+                ),
                 measurement_station_uuid=ms_uuid,
                 sensor_id=measurement.sensor_id,
                 value=measurement.value,

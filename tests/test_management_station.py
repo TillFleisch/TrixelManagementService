@@ -49,6 +49,16 @@ def test_ms_update():
 
 
 @pytest.mark.order(303)
+def test_get_own_station_detail():
+    """Test get own measurement station detail endpoint."""
+    response = client.get("/measurement_station", headers={"token": pytest.ms_token})
+    assert response.status_code == HTTPStatus.OK, response.text
+    data = response.json()
+    assert data["k_requirement"] == 7
+    assert uuid.UUID(data["uuid"]) is not None
+
+
+@pytest.mark.order(303)
 def test_get_ms_count():
     """Test get ms count endpoint."""
     response = client.get("/measurement_stations")
@@ -90,7 +100,7 @@ def test_add_get_sensor(type_: str, accuracy: float | None, sensor_name: str | N
         f"/measurement_station/sensor?{urlencode(params)}",
         headers={"token": pytest.ms_token},
     )
-    assert response.status_code == HTTPStatus.OK, response.text
+    assert response.status_code == HTTPStatus.CREATED, response.text
     data = response.json()
     id_ = data["id"]
     assert data["measurement_type"] == type_
@@ -161,7 +171,7 @@ def test_sensor_put_invalid_trixel_id():
         "/trixel/16/update/1?value=1.1&timestamp=1",
         headers={"token": pytest.ms_token},
     )
-    assert response.status_code != HTTPStatus.OK, response.text
+    assert response.status_code != HTTPStatus.CREATED, response.text
 
 
 @pytest.mark.order(309)
@@ -221,6 +231,7 @@ def test_ms_delete(db: Session, preset_tls_manager: TLSManager):
     {
         (client.put, "/measurement_station"),
         (client.delete, "/measurement_station"),
+        (client.get, "/measurement_station"),
         (client.post, "/measurement_station/sensor"),
         (client.delete, "/measurement_station/sensor/0"),
         (client.get, "/measurement_station/sensor/0"),
@@ -241,6 +252,7 @@ def test_endpoints_invalid_token(method: Callable, endpoint: str):
         (client.post, "/measurement_station"),
         (client.put, "/measurement_station"),
         (client.delete, "/measurement_station"),
+        (client.get, "/measurement_station"),
         (client.get, "/measurement_station/sensors"),
         (client.post, "/measurement_station/sensor"),
         (client.delete, "/measurement_station/sensor/0"),
