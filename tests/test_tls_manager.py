@@ -88,7 +88,7 @@ async def test_register_tls(new_tls_manager: TLSManager):
 
     request = respx.post(f"{tls_prefix}/TMS?{urlencode({'host':tms_config.host})}").mock(
         Response(
-            status_code=HTTPStatus.OK,
+            status_code=HTTPStatus.CREATED,
             json={"id": 1, "active": True, "host": tms_config.host, "token": "token"},
         )
     )

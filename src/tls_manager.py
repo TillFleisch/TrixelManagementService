@@ -108,7 +108,7 @@ class TLSManager:
         result: Response[TrixelManagementServerCreate] = await add_tms_tms_post.asyncio_detailed(
             client=self.tls_client, host=tms_config.host
         )
-        if result.status_code != HTTPStatus.OK:
+        if result.status_code != HTTPStatus.CREATED:
             raise TLSCriticalError("TLS sign-up", result)
 
         result: TrixelManagementServerCreate = result.parsed

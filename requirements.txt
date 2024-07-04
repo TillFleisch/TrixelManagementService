@@ -3,7 +3,7 @@ uvicorn==0.30
 packaging~=24.1
 pydantic-settings~=2.3
 toml==0.10.2
-trixellookupclient==0.1.1
+trixellookupclient==0.2.0
 colorlog~=6.8
 SQLAlchemy~=2.0
 sqlalchemy-timescaledb==0.4.1
