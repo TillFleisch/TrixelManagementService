@@ -5,7 +5,7 @@ from http import HTTPStatus
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import UUID4, NonNegativeInt, PositiveFloat, PositiveInt
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +15,7 @@ from common import is_active, is_delegated
 from config_schema import Config, GlobalConfig
 from database import get_db
 from model import MeasurementTypeEnum
+from privatizer.manager import PrivacyManager
 
 from . import crud, schema
 
@@ -292,15 +293,22 @@ def get_sensor(
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
 
 
-def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpdate) -> None | JSONResponse:
+def store_and_process_updates(
+    db: Session,
+    ms_uuid: UUID4,
+    updates: schema.BatchUpdate,
+    privacy_manager: PrivacyManager,
+) -> None | JSONResponse:
     """
     Process incoming sensor updates by storing them to the DB and invoking the privatizer.
 
     :param ms_uuid: The measurement station which took the measurements
     :param updates: The updated values in combination with the trixel IDs to which they belong
+    :param privacy_manager: A reference to the privacy manager
     :raises HTTPException: on invalid input
     :return: None or JSONResponse if the client should adjust settings
     """
+    k_requirement = crud.get_measurement_station(db, ms_uuid).k_requirement
     # TODO: optional - ascertain that all trixels have the same parent - should not be possible if clients are behaving
 
     invalid_trixels = set()
@@ -312,13 +320,39 @@ def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.Batch
     for trixel in invalid_trixels:
         updates.pop(trixel)
 
+    measurement_type_reference: dict[int, MeasurementTypeEnum]
+    try:
+        sensor_ids = set()
+        for measurements in updates.values():
+            for measurement in measurements:
+                sensor_ids.add(measurement.sensor_id)
+
+        measurement_type_reference = crud.get_sensor_types(db, ms_uuid=ms_uuid, sensor_ids=sensor_ids)
+    except ValueError:
+        raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
+
     try:
         crud.insert_sensor_updates(db, ms_uuid=ms_uuid, updates=updates)
         # TODO: add purge job for old data - keep statistics
 
-        # TODO: process via privatizer, call privatizer update/callback
+        # Submit to privatizers for contribution in trixels
+        adjust_trixel_map = privacy_manager.batch_contribute(
+            ms_uuid=ms_uuid,
+            updates=updates,
+            measurement_type_reference=measurement_type_reference,
+            k_requirement=k_requirement,
+        )
 
-        # TODO: use 303 redirect if a different trixel id should be used according to k requirement
+        if len(adjust_trixel_map) > 0:
+            return JSONResponse(
+                status_code=HTTPStatus.SEE_OTHER,
+                content={
+                    "reason": schema.SeeOtherReason.CHANGE_TRIXEL,
+                    "detail": "Change trixel IDs!",
+                    "sensors": adjust_trixel_map,
+                },
+            )
+
     except ValueError as e:
         raise HTTPException(HTTPStatus.BAD_REQUEST, detail=str(e))
     except IntegrityError:
@@ -327,7 +361,11 @@ def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.Batch
     if len(invalid_trixels) != 0:
         return JSONResponse(
             status_code=HTTPStatus.SEE_OTHER,
-            content={"detail": "Trixel not managed by this TMS!", "trixel_ids": list(invalid_trixels)},
+            content={
+                "reason": schema.SeeOtherReason.WRONG_TMS,
+                "detail": "Trixel not managed by this TMS!",
+                "trixel_ids": list(invalid_trixels),
+            },
         )
 
 
@@ -352,7 +390,13 @@ def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.Batch
         400: {"content": {"application/json": {"example": {"detail": "Invalid sensors provided: {0, 1}"}}}},
         303: {
             "content": {
-                "application/json": {"example": {"detail": "Trixel not managed by this TMS!", "trixel_ids": [8, 9]}}
+                "application/json": {
+                    "example": {
+                        "reason": "wrong_tms",
+                        "detail": "Trixel not managed by this TMS!",
+                        "trixel_ids": [8, 9],
+                    }
+                }
             }
         },
     },
@@ -360,6 +404,7 @@ def store_and_process_updates(db: Session, ms_uuid: UUID4, updates: schema.Batch
     status_code=HTTPStatus.OK,
 )
 def put_sensor_update(
+    request: Request,
     trixel_id: Annotated[schema.TrixelID, Path(description="The Trixel to which the sensor contributes.")],
     sensor_id: Annotated[
         NonNegativeInt,
@@ -376,7 +421,7 @@ def put_sensor_update(
     measurement = schema.Measurement(sensor_id=sensor_id, value=value, timestamp=timestamp)
     batch_update: schema.BatchUpdate = {trixel_id: [measurement]}
 
-    return store_and_process_updates(db, ms_uuid, batch_update)
+    return store_and_process_updates(db, ms_uuid, batch_update, request.app.privacy_manager)
 
 
 @router.put(
@@ -395,7 +440,13 @@ def put_sensor_update(
         400: {"content": {"application/json": {"example": {"detail": "Invalid sensors provided: {0, 1}"}}}},
         303: {
             "content": {
-                "application/json": {"example": {"detail": "Trixel not managed by this TMS!", "trixel_ids": [8, 9]}}
+                "application/json": {
+                    "example": {
+                        "reason": "wrong_tms",
+                        "detail": "Trixel not managed by this TMS!",
+                        "trixel_ids": [8, 9],
+                    }
+                }
             }
         },
     },
@@ -403,9 +454,10 @@ def put_sensor_update(
     status_code=HTTPStatus.OK,
 )
 def put_sensor_batch_update(
+    request: Request,
     updates: schema.BatchUpdate,
     ms_uuid: UUID4 = Depends(verify_ms_token),
     db: Session = Depends(get_db),
 ):
     """Publish multiple sensor updates to the TMS which are stored and processed within the desired trixels."""
-    return store_and_process_updates(db, ms_uuid, updates)
+    return store_and_process_updates(db, ms_uuid, updates, request.app.privacy_manager)

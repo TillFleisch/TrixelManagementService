@@ -3,13 +3,14 @@
 import logging
 import sys
 from enum import IntEnum
-from typing import Any, Optional, Tuple, Type
+from typing import Any, Literal, Optional, Tuple, Type
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
     GetCoreSchemaHandler,
+    NonNegativeInt,
     SecretStr,
     model_validator,
 )
@@ -102,6 +103,8 @@ class Config(BaseSettings):
     tls_config: TLSConfig
     tms_config: TMSConfig
     model_config = SettingsConfigDict(toml_file="config/config.toml")
+    trixel_update_frequency: NonNegativeInt = 60
+    privatizer: Literal["blank", "latest"] = "blank"
 
     @classmethod
     def settings_customise_sources(

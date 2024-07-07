@@ -1,5 +1,6 @@
 """Measurement station and related pydantic schemas."""
 
+import enum
 from datetime import datetime
 from typing import Annotated
 
@@ -18,6 +19,21 @@ from pydantic import (
 
 from model import MeasurementTypeEnum
 from schema import TrixelID
+
+
+class TrixelLevelChange(str, enum.Enum):
+    """Enum which indicates the actions which should be taken by a client to maintain the k-anonymity requirement."""
+
+    KEEP = "keep"
+    INCREASE = "increase"
+    DECREASE = "decrease"
+
+
+class SeeOtherReason(str, enum.Enum):
+    """Enum which indicates the reason for a see other status code."""
+
+    WRONG_TMS = "wrong_tms"
+    CHANGE_TRIXEL = "change_trixel"
 
 
 class MeasurementStationBase(BaseModel):
@@ -92,7 +108,7 @@ class Measurement(BaseModel):
         NonNegativeInt,
         Field(description="The ID of the sensor which took the measurement."),
     ]
-    value: Annotated[float, Field(description="The updated measurement value.")]
+    value: Annotated[float | None, Field(description="The updated measurement value.")]
 
     # TODO: assert timestamp is "reasonable" - not far in the past/future
     # TODO: consider adding a heartbeat option per sensor to prevent value re-transmission

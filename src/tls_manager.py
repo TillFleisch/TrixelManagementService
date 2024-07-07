@@ -11,7 +11,14 @@ from pathlib import Path
 import packaging.version
 import toml
 from httpx import ConnectError
+from pydantic import NonNegativeInt
 from trixellookupclient import Client
+from trixellookupclient.api.trixel_information import (
+    get_sub_trixels_which_have_registered_sensors_trixel_trixel_id_get as get_sub_trixels,
+)
+from trixellookupclient.api.trixel_information import (
+    update_trixel_count_trixel_trixel_id_sensor_count_type_put as update_trixel_map_entry,
+)
 from trixellookupclient.api.trixel_management_servers import add_tms_tms_post
 from trixellookupclient.api.trixel_management_servers import (
     get_all_delegations_for_the_provided_tms_tms_tms_id_delegations_get as get_delegation_for_tms,
@@ -26,12 +33,14 @@ from trixellookupclient.models import (
     TMSDelegation,
     TrixelManagementServer,
     TrixelManagementServerCreate,
+    TrixelMapUpdate,
 )
 from trixellookupclient.types import Response
 
 from config_schema import Config, GlobalConfig
-from exception import TLSCriticalError
+from exception import TLSCriticalError, TLSError
 from logging_helper import get_logger
+from model import MeasurementTypeEnum
 
 api_version = importlib.metadata.version("trixellookupclient")
 logger = get_logger(__name__)
@@ -177,3 +186,67 @@ class TLSManager:
 
         self.config.tms_config.delegations = result
         return result
+
+    async def publish_trixel_map_entry(
+        self,
+        trixel_id: int,
+        type_: MeasurementTypeEnum,
+        measurement_station_count: NonNegativeInt,
+    ) -> TrixelMapUpdate:
+        """
+        Update the sensor count for a trixel and measurement type at the TLS.
+
+        :param trixel_id: The trixel for which the sensor count is updated
+        :param type_: The measurement type for which the sensor count is updated
+        :param measurement_station_count: The new sensor count
+        :return: updated trixel map entry
+        :raises TLSError: if updating the value failed
+        :raises TLSCriticalError: if authentication failed
+        """
+        result: Response[TrixelMapUpdate] = await update_trixel_map_entry.asyncio_detailed(
+            client=self.tls_client,
+            trixel_id=trixel_id,
+            type=type_,
+            sensor_count=measurement_station_count,
+            token=self.config.tms_config.api_token.get_secret_value(),
+        )
+
+        if result.status_code == HTTPStatus.UNAUTHORIZED:
+            raise TLSCriticalError("Authentication failed during trixel map update!")
+
+        if result.status_code != HTTPStatus.OK:
+            raise TLSError("TMS fetch-delegations", result)
+
+        return result.parsed
+
+    async def get_trixel_map_overview(self) -> dict[MeasurementTypeEnum, set[int]]:
+        """
+        Retrieve trixels which have at least one measurement station according to the TLS.
+
+        Results are separated by measurement type for all trixels delegated to this TMS.
+
+        :returns: dict containing all trixels which have at least one sensor for each measurement type
+        """
+        # TODO: does not consider delegation exclusion
+        delegations = self.config.tms_config.delegations
+
+        if len(delegations) == 0:
+            raise TLSCriticalError("Failed to fetch trixel sensor count overview. Delegations unknown.")
+
+        overview: dict[MeasurementTypeEnum, set[int]] = dict()
+        for type_ in MeasurementTypeEnum:
+            for delegation in delegations:
+
+                if delegation.exclude is False:
+                    result: Response[list[int]] = await get_sub_trixels.asyncio_detailed(
+                        client=self.tls_client,
+                        types=[type_],
+                        trixel_id=delegation.trixel_id,
+                    )
+
+                if result.status_code != HTTPStatus.OK:
+                    raise TLSCriticalError("TMS fetch trixel overview failed!", result)
+
+                overview.setdefault(type_, set()).update(result.parsed)
+
+        return overview

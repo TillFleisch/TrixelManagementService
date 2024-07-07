@@ -106,7 +106,7 @@ def delete_measurement_station(db: Session, uuid_: UUID4) -> bool:
     ) is None
 
 
-def get_measurement_station(db: Session, uuid_: UUID4) -> model.MeasurementStation.active:
+def get_measurement_station(db: Session, uuid_: UUID4) -> model.MeasurementStation:
     """
     Get details about a measurement station.
 
@@ -271,3 +271,24 @@ def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpda
         raise ValueError("Only one update per sensor allowed!")
 
     db.commit()
+
+
+def get_sensor_types(db: Session, ms_uuid: UUID4, sensor_ids: set[int]) -> dict[int, MeasurementTypeEnum]:
+    """
+    Retrieve the sensor type for sensors within a measurement station.
+
+    :param ms_uuid: The measurement station for which sensor types are retrieved
+    :param sensor_ids: list of sensor id's for which the type is resolved
+    :returns: dictionary containing the measurement type for each provided sensor
+    """
+    lookup = dict()
+    result = (
+        db.query(model.Sensor.id, model.Sensor.measurement_type)
+        .where(model.Sensor.measurement_station_uuid == ms_uuid)
+        .where(model.Sensor.id.in_(sensor_ids))
+        .all()
+    )
+
+    for sensor_id, type_ in result:
+        lookup[sensor_id] = MeasurementTypeEnum.get_from_id(type_)
+    return lookup

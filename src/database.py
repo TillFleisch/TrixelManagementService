@@ -35,6 +35,7 @@ if DATABASE_URL is None:
     DATABASE_URL = "sqlite:///./config/tms_sqlite.db"
     connect_args = {"check_same_thread": False}
 
+# TODO: use async engine/sessions
 engine = create_engine(DATABASE_URL, connect_args=connect_args)
 
 MetaSession = sessionmaker(autoflush=False, autocommit=False, bind=engine)
@@ -60,6 +61,11 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def get_db_session():
+    """Get a database session."""
+    return next(get_db())
 
 
 def except_columns(base, *exclusions: str) -> list[str]:

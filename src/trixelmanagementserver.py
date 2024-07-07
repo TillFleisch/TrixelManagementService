@@ -18,6 +18,10 @@ from database import engine, get_db
 from logging_helper import get_logger
 from measurement_station.measurement_station import TAG_MEASUREMENT_STATION
 from measurement_station.measurement_station import router as measurement_station_router
+from privatizer.blank_privatizer import BlankPrivatizer
+from privatizer.latest_privatizer import LatestPrivatizer
+from privatizer.manager import PrivacyManager
+from privatizer.privatizer import Privatizer
 from schema import Ping, Version
 from tls_manager import TLSManager
 
@@ -26,7 +30,6 @@ config: Config = GlobalConfig.config
 
 model.Base.metadata.create_all(bind=engine)
 
-tls_manger: TLSManager = TLSManager()
 logger = get_logger(__name__)
 
 openapi_tags = [
@@ -38,7 +41,8 @@ openapi_tags = [
 async def lifespan(app: FastAPI):
     """Lifespan actions executed before and after FastAPI."""
     init_measurement_type_enum(next(get_db()))
-    asyncio.create_task(tls_manger.start())
+    asyncio.create_task(app.tls_manger.start())
+    asyncio.create_task(app.privacy_manager.periodic_processing())
     yield
 
 
@@ -54,6 +58,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 app.include_router(measurement_station_router)
+app.tls_manger = TLSManager()
+
+privatizer_class: type[Privatizer]
+if config.privatizer == "blank":
+    privatizer_class = BlankPrivatizer
+elif config.privatizer == "latest":
+    privatizer_class = LatestPrivatizer
+app.privacy_manager = PrivacyManager(tls_manager=app.tls_manger, privatizer_class=privatizer_class)
 
 
 @app.get(
@@ -91,7 +103,7 @@ def get_active() -> Response:
     return Response(status_code=HTTPStatus.OK)
 
 
-# TODO: add (authenticated) /delegations PUT endpoint for delegation updates from the TMS
+# TODO: add (authenticated) /delegations PUT endpoint for delegation updates from the TLS
 
 
 def main() -> None:

@@ -137,7 +137,7 @@ def test_delete_sensor():
 
 
 @pytest.mark.order(308)
-@pytest.mark.parametrize("trixel_id", {8, 9, 15, 35})
+@pytest.mark.parametrize("trixel_id", {61, 245, 35, 4015772})
 def test_sensor_put(trixel_id: int):
     """Happy path for putting a single update."""
     # Trixel id is subtracted from time to prevent duplicate timestamps for the same sensors
@@ -145,20 +145,20 @@ def test_sensor_put(trixel_id: int):
         f"/trixel/{trixel_id}/update/1?value=1.1&timestamp={int(datetime.now().timestamp()-trixel_id)}",
         headers={"token": pytest.ms_token},
     )
-    assert response.status_code == HTTPStatus.OK, response.text
+    assert response.status_code == HTTPStatus.OK or response.status_code == HTTPStatus.SEE_OTHER, response.text
 
 
 @pytest.mark.order(308)
 def test_sensor_put_update_invalid_time():
     """Test repeated value insertion."""
     response = client.put(
-        "/trixel/8/update/1?value=1.1&timestamp=0",
+        "/trixel/61/update/1?value=1.1&timestamp=0",
         headers={"token": pytest.ms_token},
     )
     assert response.status_code == HTTPStatus.OK, response.text
 
     response = client.put(
-        "/trixel/8/update/1?value=1.1&timestamp=0",
+        "/trixel/61/update/1?value=1.1&timestamp=0",
         headers={"token": pytest.ms_token},
     )
     assert response.status_code == HTTPStatus.BAD_REQUEST, response.text
