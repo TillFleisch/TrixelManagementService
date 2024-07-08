@@ -90,6 +90,6 @@ class LatestPrivatizer(Privatizer):
             child_privatizer = self.get_privatizer(trixel_id=child)
             if child_privatizer is not None and child_privatizer.value is not None:
                 child_count += 1
-                child_sum = child_privatizer.value
+                child_sum += child_privatizer.value
 
         return self._last_value if child_count == 0 else (child_sum / child_count)

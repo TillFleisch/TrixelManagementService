@@ -72,16 +72,18 @@ class Privatizer:
     __evaluation_map: dict[UniqueSensorId, bool]
 
     __contributing_ms_count: NonNegativeInt = 0
+    __contributing_sensor_count: NonNegativeInt = 0
 
     # The measurement station count used at the TLS, which is visible to clients
     __tls_ms_count: NonNegativeInt | None = None
-    __value: float | None = None
+    __last_update: TrixelUpdate | None = None
+
     __stale: bool = False
 
     @property
     def value(self) -> float | None:
         """The last calculated (current) measurement value for trixel&type managed by this privatizer."""
-        return self.__value
+        return None if self.__last_update is None else self.__last_update.value
 
     @property
     def measurement_type(self) -> MeasurementTypeEnum:
@@ -103,9 +105,18 @@ class Privatizer:
         """
         Get the number of contributing measurement stations within the trixel&type of this privatizer.
 
-        This can be used to determine if the k-requirement of a sensor can be satisfied.
+        This values does not include measurement stations within sub-trixels.
         """
         return self.__contributing_ms_count
+
+    @property
+    def contributing_sensor_count(self) -> NonNegativeInt:
+        """
+        Get the number of sensors within the trixel&type of this privatizer.
+
+        This value does not include sensors within sub-trixels.
+        """
+        return self.__contributing_sensor_count
 
     def __init__(
         self,
@@ -219,7 +230,7 @@ class Privatizer:
         The k anonymity guaranteeing property is checked using the "verified" contributor count, which is returned by
         this method.
 
-        :return: number of valid sensors within the trixel and measurement type managed by this privatizer.
+        :return: number of valid measurement stations within the trixel and measurement type managed by this privatizer.
         This value can be used for k-anonymity checking.
         """
         sub_trixel_count = 0
@@ -230,6 +241,24 @@ class Privatizer:
         # TODO: add caching to avoid recursive calls
 
         return self.__contributing_ms_count + sub_trixel_count
+
+    @final
+    def get_total_contributing_sensor_count(self) -> NonNegativeInt:
+        """
+        Get the number of sensors, which are contributing to this trixel and type.
+
+        Like `get_total_contributing_ms_count` but for sensors instead o measurement stations.
+
+        :return: number of valid sensors within the trixel and measurement type managed by this privatizer.
+        """
+        sub_trixel_count = 0
+        for trixel_id in self._children:
+            child_privatizer: Privatizer | None = self.get_privatizer(trixel_id)
+            if child_privatizer is not None:
+                sub_trixel_count += child_privatizer.get_total_contributing_sensor_count()
+        # TODO: add caching to avoid recursive calls
+
+        return self.__contributing_sensor_count + sub_trixel_count
 
     def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
         """
@@ -262,7 +291,8 @@ class Privatizer:
         :param should_evaluate: If this privatizer should evaluate this sensor
         """
         self._sensors.add(unique_sensor_id)
-        self._shadow_map[unique_sensor_id] = True
+        if unique_sensor_id not in self._shadow_map:
+            self._shadow_map[unique_sensor_id] = True
         self.__evaluation_map[unique_sensor_id] = should_evaluate
 
     def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
@@ -338,7 +368,7 @@ class Privatizer:
     # TODO: method which gets a standardized "quality" statement about a sensor
 
     @final
-    async def process(self) -> TrixelUpdate:
+    async def process(self) -> tuple[TrixelUpdate, bool]:
         """
         Process incoming data for the trixel and measurement type to determine the output value of the trixel.
 
@@ -360,7 +390,7 @@ class Privatizer:
         This method is called periodically to evaluate sensors and determine the output value.
         This method is called for all child privatizers before this privatizer is called.
 
-        :return: Updated information about the output state of this trixel
+        :return: Updated information about the output state of this trixel and weather the TLS state should be updated
         """
         # TODO: consider implementing/requiring asynchronous sensor evaluation
         self.pre_processing()
@@ -399,27 +429,43 @@ class Privatizer:
                 self._shadow_map[sensor] = True
 
         contributing_ms: set[UUID4] = set()
+        contributing_sensor_count = 0
         sensor: UniqueSensorId
         for sensor in contributing_sensor_set:
             if sensor in self._shadow_map and not self._shadow_map[sensor]:
                 # Count real contributions only if the sensor is not in shadow mode
                 contributing_ms.add(sensor.ms_uuid)
+                contributing_sensor_count += 1
+
         self.__contributing_ms_count = len(contributing_ms)
 
-        new_count = self.__contributing_ms_count + child_ms_count
-        self.__stale = False if new_count > 0 or len(self._sensors) > 0 else True
-        if new_count == self.__tls_ms_count:
-            new_count = None
+        new_measurement_station_count = self.__contributing_ms_count + child_ms_count
+        self.__stale = False if new_measurement_station_count > 0 or len(self._sensors) > 0 else True
+
+        self.__contributing_sensor_count = contributing_sensor_count
+        new_sensor_count = self.get_total_contributing_sensor_count()
+
+        update_tls: bool = False
+        if new_measurement_station_count != self.__tls_ms_count:
+            update_tls = True
 
         new_value = self.get_value()
-        if new_value != self.__value:
-            self.__value = new_value
-        else:
-            new_value = None
+
+        changed: bool = False
+        if self.__last_update is not None and (
+            self.__last_update.value != new_value
+            or self.__last_update.measurement_station_count != new_measurement_station_count
+            or self.__last_update.sensor_count != new_sensor_count
+        ):
+            changed = True
+
+        update = TrixelUpdate(
+            changed=changed,
+            value=new_value,
+            measurement_station_count=new_measurement_station_count,
+            sensor_count=new_sensor_count,
+        )
+        self.__last_update = update
 
         self.post_processing()
-        return TrixelUpdate(
-            measurement_station_count=new_count,
-            available=(self.__value is not None),
-            value=new_value,
-        )
+        return (update, update_tls)

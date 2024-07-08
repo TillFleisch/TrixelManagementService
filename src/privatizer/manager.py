@@ -7,7 +7,9 @@ from pydantic import UUID4, NonNegativeInt, PositiveInt
 from pynyhtm import HTM
 from trixellookupclient.models import TrixelMapUpdate
 
+import measurement_station.crud as crud
 from config_schema import GlobalConfig
+from database import get_db_session
 from exception import TLSError
 from logging_helper import get_logger
 from measurement_station.schema import BatchUpdate, Measurement, TrixelLevelChange
@@ -345,46 +347,55 @@ class PrivacyManager:
 
         This procedure is performed for each measurement type individually.
         """
-        # Process privatizers by type, and increasing levels
-        for type_ in self._privatizers:
-            privatizers_type_subset = self._privatizers[type_]
+        with get_db_session() as db:
+            # Process privatizers by type, and increasing levels
+            for type_ in self._privatizers:
+                privatizers_type_subset = self._privatizers[type_]
 
-            for level in sorted(self._level_lookup.keys(), reverse=True):
-                stale_privatizers: set[int] = set()
+                for level in sorted(self._level_lookup.keys(), reverse=True):
+                    stale_privatizers: set[int] = set()
 
-                # TODO: process trixels within same level in parallel
-                new_trixel_values: dict[int, float] = dict()
-                for trixel_id in self._level_lookup[level]:
+                    # TODO: process trixels within same level in parallel
+                    trixel_updates: dict[int, TrixelUpdate] = dict()
+                    for trixel_id in list(self._level_lookup[level]):
 
-                    if trixel_id not in privatizers_type_subset:
-                        continue
+                        if trixel_id not in privatizers_type_subset:
+                            continue
 
-                    privatizer: Privatizer = privatizers_type_subset[trixel_id]
-                    trixel_update: TrixelUpdate = await privatizer.process()
+                        privatizer: Privatizer = privatizers_type_subset[trixel_id]
+                        trixel_update: TrixelUpdate
+                        update_tls: bool
+                        trixel_update, update_tls = await privatizer.process()
 
-                    if trixel_update.measurement_station_count is not None:
-                        result = await self._publish_measurement_station_count(
-                            privatizer=privatizer,
-                            ms_count=trixel_update.measurement_station_count,
-                        )
-                        if result is not None:
-                            privatizer.set_tls_ms_count(result)
+                        if update_tls:
+                            result = await self._publish_measurement_station_count(
+                                privatizer=privatizer,
+                                ms_count=trixel_update.measurement_station_count,
+                            )
+                            if result is not None:
+                                privatizer.set_tls_ms_count(result)
 
-                    if trixel_update.available:
-                        new_trixel_values[level] = trixel_update.value
+                        if trixel_update.changed:
+                            trixel_updates[trixel_id] = trixel_update
 
-                    if privatizer.stale:
-                        stale_privatizers.add(trixel_id)
+                        if privatizer.stale:
+                            stale_privatizers.add(trixel_id)
 
-                # Remove stale privatizers
-                for trixel_id in stale_privatizers:
-                    del self._privatizers[type_][trixel_id]
+                            # Insert a "trixel" state unknown update into the db
+                            if privatizer.value is not None:
+                                trixel_updates[trixel_id] = TrixelUpdate(
+                                    changed=True, value=None, sensor_count=0, measurement_station_count=0
+                                )
 
-                # TODO: publish measurement station counts in batches after each level (use batch update at TLS)
+                    # Remove stale privatizers
+                    for trixel_id in stale_privatizers:
+                        del self._privatizers[type_][trixel_id]
 
-            # TODO: persist new_trixel_values in db
-            # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
-            #       also (calls to privatizer)?
+                    # TODO: publish measurement station counts in batches after each level (use batch update at TLS)
+
+                    crud.insert_observations(db, measurement_type=type_, updates=trixel_updates)
+                # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
+                #       also (calls to privatizer)?
 
     async def periodic_processing(self):
         """

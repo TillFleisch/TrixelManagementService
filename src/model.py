@@ -2,7 +2,16 @@
 
 import enum
 
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+)
 
 from database import Base
 
@@ -36,3 +45,23 @@ class MeasurementType(Base):
 
     id = Column(Integer, unique=True, primary_key=True, nullable=False, index=True)
     name = Column(String(32), unique=True, nullable=False)
+
+
+class Observation(Base):
+    """Table which hold environmental observations within trixels."""
+
+    __tablename__ = "observation"
+
+    time = Column(DateTime(timezone=True), primary_key=True)
+    trixel_id = Column(Integer, primary_key=True)
+    measurement_type = Column(Integer, ForeignKey("measurement_type.id"))
+    value = Column(Float)
+    sensor_count = Column(Integer, default=0, nullable=False)
+    measurement_station_count = Column(Integer, default=0, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(time, trixel_id, measurement_type, name="unique_constraint_single_measurement"),
+        CheckConstraint(sensor_count >= 0, name="check_non_negative_sensor_count"),
+        CheckConstraint(measurement_station_count >= 0, name="check_non_negative_measurement_station_count"),
+        {"timescaledb_hypertable": {"time_column_name": "time"}},
+    )

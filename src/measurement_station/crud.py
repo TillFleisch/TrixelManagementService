@@ -10,7 +10,9 @@ from sqlalchemy import delete, or_, update
 from sqlalchemy.orm import Session
 
 from database import except_columns
-from model import MeasurementTypeEnum
+from model import MeasurementTypeEnum, Observation
+from privatizer.schema import TrixelUpdate
+from schema import TrixelID
 
 from . import model, schema
 
@@ -292,3 +294,28 @@ def get_sensor_types(db: Session, ms_uuid: UUID4, sensor_ids: set[int]) -> dict[
     for sensor_id, type_ in result:
         lookup[sensor_id] = MeasurementTypeEnum.get_from_id(type_)
     return lookup
+
+
+def insert_observations(
+    db: Session, measurement_type: MeasurementTypeEnum, updates: dict[TrixelID, TrixelUpdate]
+) -> None:
+    """
+    Bulk insert a set of trixel-observations into the DB.
+
+    :param measurement_type: the measurement type for which updates are provided
+    :param updates: trixel updates for each trixel
+    """
+    observations: list[Observation] = list()
+    for trixel_id, update_ in updates.items():
+        observation = Observation(
+            time=datetime.now(),
+            trixel_id=trixel_id,
+            measurement_type=measurement_type.get_id(),
+            value=update_.value,
+            measurement_station_count=update_.measurement_station_count,
+            sensor_count=update_.sensor_count,
+        )
+        observations.append(observation)
+
+    db.bulk_save_objects(observations)
+    db.commit()
