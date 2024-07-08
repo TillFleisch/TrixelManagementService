@@ -411,16 +411,33 @@ class Privatizer:
         shadow_contributing_ms: set[UUID4] = set()
         for sensor in contributing_sensor_set:
             shadow_contributing_ms.add(sensor.ms_uuid)
-        shadow_contributing_ms_count = len(shadow_contributing_ms)
 
-        # Determine the number of potential contributing sensors within this trixel (incl. shadow contributions)
         child_ms_count = self.get_total_contributing_ms_count() - self.__contributing_ms_count
-        potential_total_contributor_count = shadow_contributing_ms_count + child_ms_count
+
+        # Map k-requirements and how many contributors there are to each k-level
+        shadow_k_satisfiers: dict[int, int] = dict()
+        for ms_uuid in shadow_contributing_ms:
+            k = self.get_k_requirement(ms_uuid)
+            shadow_k_satisfiers.setdefault(k, 0)
+            shadow_k_satisfiers[k] += 1
+
+        # add k-over-satisfiers to lower k-levels (a sensor which requires k=2 also counts towards a k=3 requirement)
+        for k in shadow_k_satisfiers.keys():
+            for other_k in shadow_k_satisfiers.keys():
+                if k > other_k:
+                    shadow_k_satisfiers[k] += shadow_k_satisfiers[other_k]
+
+        # Determine highest k which can be achieved when using shadow contributions
+        shadow_max_k = 0
+        for k, satisfier_count in shadow_k_satisfiers.items():
+            # Child contributions counts are included as those must already be k-satisfied
+            if (satisfier_count + child_ms_count) >= k and k >= shadow_max_k:
+                shadow_max_k = k
 
         # Unlock sensors from shadow contributing if their k-requirement can be satisfied
         for sensor in self._sensors:
             k = self.get_k_requirement(sensor)
-            if k <= potential_total_contributor_count:
+            if k <= shadow_max_k:
                 self._shadow_map[sensor] = False
 
                 if self._parent_privatizer is not None:
