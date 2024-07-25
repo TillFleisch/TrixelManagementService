@@ -5,7 +5,6 @@ from typing import ClassVar, Type
 
 from pydantic import UUID4, NonNegativeInt, PositiveInt
 from pynyhtm import HTM
-from trixellookupclient.models import TrixelMapUpdate
 
 import measurement_station.crud as crud
 from config_schema import GlobalConfig
@@ -310,33 +309,35 @@ class PrivacyManager:
         return adjust_trixel_map
 
     @classmethod
-    async def _publish_measurement_station_count(
-        cls, privatizer: Privatizer, ms_count: NonNegativeInt
-    ) -> NonNegativeInt | None:
+    async def _batch_publish_measurement_station_count(cls, updates: dict[Privatizer, NonNegativeInt]) -> None:
         """
-        Publish the measurement station count for a measurement type and trixel to the TLS.
+        Publish the measurement station count for a measurement type and multiple trixels to the TLS.
 
-        :param privatizer: The privatizer for which the measurement station count is updated at the TLS
+        :param update: dictionary which holds the new number of sensors for different privatizers.
         :param ms_count: the new measurement station count value
-        :returns: updated measurement station count or None if unsuccessful
         """
-        id_ = privatizer._id
-        measurement_type = privatizer._measurement_type
+        if len(updates) == 0:
+            return
 
-        # TODO: replace with batch update endpoint
-        logger.debug(
-            f"Publishing measurement station count {ms_count} for (trixel: {id_} type: {measurement_type}) to TLS."
-        )
+        first_privatizer: Privatizer = next(iter(updates.keys()))
+        measurement_type = first_privatizer._measurement_type
+        level = first_privatizer._level
+
+        logger.debug(f"Publishing measurement station counts for (level: {level} type: {measurement_type}) to TLS.")
         try:
-            tls_update_result: TrixelMapUpdate = await cls._tls_manager.publish_trixel_map_entry(
-                trixel_id=id_, type_=measurement_type, measurement_station_count=ms_count
-            )
-            return tls_update_result.sensor_count
+            new_sensor_counts: dict[TrixelID, NonNegativeInt] = dict()
+            for privatizer, sensor_count in updates.items():
+                new_sensor_counts[privatizer._id] = sensor_count
+            await cls._tls_manager.publish_trixel_map_entries(type_=measurement_type, updates=new_sensor_counts)
+
+            # Update entries within privatizers after successful update at the TLS
+            privatizer: Privatizer
+            for privatizer, sensor_count in updates.items():
+                privatizer.set_tls_ms_count(sensor_count)
         except TLSError:
             logger.critical(
-                f"Failed to publish measurement station count {ms_count} for (trixel: {id_} type: {measurement_type})."
+                f"Failed to publish measurement station counts for (level: {level} type: {measurement_type}) to TLS."
             )
-        return None
 
     async def process(self):
         """
@@ -356,7 +357,8 @@ class PrivacyManager:
                     stale_privatizers: set[int] = set()
 
                     # TODO: process trixels within same level in parallel
-                    trixel_updates: dict[int, TrixelUpdate] = dict()
+                    trixel_updates: dict[TrixelID, TrixelUpdate] = dict()
+                    tls_updates: dict[Privatizer, NonNegativeInt] = dict()
                     for trixel_id in list(self._level_lookup[level]):
 
                         if trixel_id not in privatizers_type_subset:
@@ -368,12 +370,7 @@ class PrivacyManager:
                         trixel_update, update_tls = await privatizer.process()
 
                         if update_tls:
-                            result = await self._publish_measurement_station_count(
-                                privatizer=privatizer,
-                                ms_count=trixel_update.measurement_station_count,
-                            )
-                            if result is not None:
-                                privatizer.set_tls_ms_count(result)
+                            tls_updates[privatizer] = trixel_update.measurement_station_count
 
                         if trixel_update.changed:
                             trixel_updates[trixel_id] = trixel_update
@@ -391,7 +388,7 @@ class PrivacyManager:
                     for trixel_id in stale_privatizers:
                         del self._privatizers[type_][trixel_id]
 
-                    # TODO: publish measurement station counts in batches after each level (use batch update at TLS)
+                    await self._batch_publish_measurement_station_count(tls_updates)
 
                     crud.insert_observations(db, measurement_type=type_, updates=trixel_updates)
                 # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
