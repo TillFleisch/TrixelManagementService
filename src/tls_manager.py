@@ -29,6 +29,9 @@ from trixellookupclient.api.trixel_management_servers import (
 from trixellookupclient.api.trixel_management_servers import (
     update_tms_details_tms_tms_id_put as update_tms_detail,
 )
+from trixellookupclient.api.trixel_management_servers import (
+    validate_tms_token_tms_tms_id_validate_token_get as validate_token,
+)
 from trixellookupclient.models import (
     BatchUpdateTrixelCountTrixelSensorCountTypePutUpdates as BatchUpdateSensorCount,
 )
@@ -139,40 +142,48 @@ class TLSManager:
         if tms_config.id is None:
             raise TLSCriticalError("Own TMS ID unknown!")
 
-        result: Response[TrixelManagementServer] = await get_tms_detail.asyncio_detailed(
+        detail_result: Response[TrixelManagementServer] = await get_tms_detail.asyncio_detailed(
             client=self.tls_client,
             tms_id=tms_config.id,
         )
 
-        if result.status_code != HTTPStatus.OK:
-            raise TLSCriticalError("TMS info retrieval", result)
+        if detail_result.status_code != HTTPStatus.OK:
+            raise TLSCriticalError("TMS info retrieval", detail_result)
 
-        result: TrixelManagementServer = result.parsed
+        detail_result: TrixelManagementServer = detail_result.parsed
 
-        self.config.tms_config.id = result.id
-        self.config.tms_config.active = result.active
+        self.config.tms_config.id = detail_result.id
+        self.config.tms_config.active = detail_result.active
         tms_config = self.config.tms_config
 
         if not tms_config.active:
             raise TLSCriticalError("TMS is deactivated by the TLS.")
 
+        # Verify that the local authentication token is still valid
+        token_validation_result: Response = await validate_token.asyncio_detailed(
+            client=self.tls_client, tms_id=tms_config.id, token=tms_config.api_token.get_secret_value()
+        )
+        if token_validation_result.status_code == HTTPStatus.UNAUTHORIZED:
+            raise TLSCriticalError("TMS authentication token invalid!")
+        elif token_validation_result.status_code != HTTPStatus.OK:
+            raise TLSCriticalError("TMS token validation", token_validation_result)
+
         # Update new information on TLS
-        # TODO: the update is always executed to validate the token (replace with auth validation endpoint)
-        if result.host != tms_config.host or True:
+        if detail_result.host != tms_config.host:
             logger.debug("Posting new host address to TLS")
 
-            result: Response[TrixelManagementServer] = await update_tms_detail.asyncio_detailed(
+            detail_result: Response[TrixelManagementServer] = await update_tms_detail.asyncio_detailed(
                 client=self.tls_client,
                 tms_id=tms_config.id,
                 host=tms_config.host,
                 token=tms_config.api_token.get_secret_value(),
             )
-            if result.status_code != HTTPStatus.OK:
-                raise TLSCriticalError("TMS update-details", result)
-            result: TrixelManagementServerCreate = result.parsed
+            if detail_result.status_code != HTTPStatus.OK:
+                raise TLSCriticalError("TMS update-details", detail_result)
+            detail_result: TrixelManagementServerCreate = detail_result.parsed
 
-            self.config.tms_config.id = result.id
-            self.config.tms_config.active = result.active
+            self.config.tms_config.id = detail_result.id
+            self.config.tms_config.active = detail_result.active
 
         update_config_file(config=self.config)
 

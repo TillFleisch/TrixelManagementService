@@ -132,10 +132,14 @@ async def test_sync_tls_config(preset_tls_manager: TLSManager):
     manager = preset_tls_manager
     tms_config = manager.config.tms_config
 
+    validation_request = respx.get(f"{tls_prefix}/TMS/{tms_config.id}/validate_token").mock(
+        Response(status_code=HTTPStatus.OK, json="")
+    )
+
     get_request = respx.get(f"{tls_prefix}/TMS/{tms_config.id}").mock(
         Response(
             status_code=HTTPStatus.OK,
-            json={"id": tms_config.id, "active": True, "host": tms_config.host},
+            json={"id": tms_config.id, "active": True, "host": "old.host"},
         )
     )
 
@@ -148,6 +152,7 @@ async def test_sync_tls_config(preset_tls_manager: TLSManager):
 
     await manager.sync_tls_config()
 
+    assert validation_request.called
     assert get_request.called
     assert put_request.called
 
@@ -195,10 +200,14 @@ async def test_sync_tls_invalid_responses(status_code: int, path: bool, preset_t
     manager = preset_tls_manager
     tms_config = manager.config.tms_config
 
+    validation_request = respx.get(f"{tls_prefix}/TMS/{tms_config.id}/validate_token").mock(
+        Response(status_code=HTTPStatus.OK, json="")
+    )
+
     respx.get(f"{tls_prefix}/TMS/{tms_config.id}").mock(
         Response(
             status_code=HTTPStatus.OK if path else status_code,
-            json={"id": tms_config.id, "active": True, "host": tms_config.host},
+            json={"id": tms_config.id, "active": True, "host": "old.host"},
         )
     )
 
@@ -211,3 +220,6 @@ async def test_sync_tls_invalid_responses(status_code: int, path: bool, preset_t
 
     with pytest.raises(TLSCriticalError):
         await manager.sync_tls_config()
+
+    if path:
+        assert validation_request.called
