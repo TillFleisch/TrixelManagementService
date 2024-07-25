@@ -350,20 +350,19 @@ class PrivacyManager:
         """
         with get_db_session() as db:
             # Process privatizers by type, and increasing levels
-            for type_ in self._privatizers:
+
+            async def process_type(type_) -> None:
+                """Process trixels in bottom-up fashion for the given level."""
                 privatizers_type_subset = self._privatizers[type_]
 
                 for level in sorted(self._level_lookup.keys(), reverse=True):
                     stale_privatizers: set[int] = set()
 
-                    # TODO: process trixels within same level in parallel
                     trixel_updates: dict[TrixelID, TrixelUpdate] = dict()
                     tls_updates: dict[Privatizer, NonNegativeInt] = dict()
-                    for trixel_id in list(self._level_lookup[level]):
 
-                        if trixel_id not in privatizers_type_subset:
-                            continue
-
+                    async def process_trixel(trixel_id) -> None:
+                        """Process a single trixel within a level."""
                         privatizer: Privatizer = privatizers_type_subset[trixel_id]
                         trixel_update: TrixelUpdate
                         update_tls: bool
@@ -384,6 +383,12 @@ class PrivacyManager:
                                     changed=True, value=None, sensor_count=0, measurement_station_count=0
                                 )
 
+                    tasks: list = list()
+                    for trixel_id in list(self._level_lookup[level]):
+                        if trixel_id in privatizers_type_subset:
+                            tasks.append(process_trixel(trixel_id))
+                    await asyncio.gather(*tasks)
+
                     # Remove stale privatizers
                     for trixel_id in stale_privatizers:
                         del self._privatizers[type_][trixel_id]
@@ -393,6 +398,8 @@ class PrivacyManager:
                     crud.insert_observations(db, measurement_type=type_, updates=trixel_updates)
                 # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
                 #       also (calls to privatizer)?
+
+            await asyncio.gather(*[process_type(type_) for type_ in self._privatizers])
 
     async def periodic_processing(self):
         """
