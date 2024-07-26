@@ -8,7 +8,7 @@ from pynyhtm import HTM
 
 import measurement_station.crud as crud
 from config_schema import GlobalConfig
-from database import get_db_session
+from database import get_db
 from exception import TLSError
 from logging_helper import get_logger
 from measurement_station.schema import BatchUpdate, Measurement, TrixelLevelChange
@@ -339,6 +339,61 @@ class PrivacyManager:
                 f"Failed to publish measurement station counts for (level: {level} type: {measurement_type}) to TLS."
             )
 
+    async def _process_measurement_type(self, type_) -> None:
+        """
+        Process privatizers in a bottom-up fashion for the given measurement type.
+
+        Starting at the trixels with the highest level, privatizers are executed in batches towards the root-level.
+        Thus, the output of smaller trixels can be used in higher-level trixel.
+        Privatizers within the same level are evaluated concurrently.
+        """
+        async for db in get_db():
+            privatizers_type_subset = self._privatizers[type_]
+
+            for level in sorted(self._level_lookup.keys(), reverse=True):
+                stale_privatizers: set[int] = set()
+
+                trixel_updates: dict[TrixelID, TrixelUpdate] = dict()
+                tls_updates: dict[Privatizer, NonNegativeInt] = dict()
+
+                async def process_trixel(trixel_id) -> None:
+                    """Process a single trixel within a level."""
+                    privatizer: Privatizer = privatizers_type_subset[trixel_id]
+                    trixel_update: TrixelUpdate
+                    update_tls: bool
+                    trixel_update, update_tls = await privatizer.process()
+
+                    if update_tls:
+                        tls_updates[privatizer] = trixel_update.measurement_station_count
+
+                    if trixel_update.changed:
+                        trixel_updates[trixel_id] = trixel_update
+
+                    if privatizer.stale:
+                        stale_privatizers.add(trixel_id)
+
+                        # Insert a "trixel" state unknown update into the db
+                        if privatizer.value is not None:
+                            trixel_updates[trixel_id] = TrixelUpdate(
+                                changed=True, value=None, sensor_count=0, measurement_station_count=0
+                            )
+
+                tasks: list = list()
+                for trixel_id in list(self._level_lookup[level]):
+                    if trixel_id in privatizers_type_subset:
+                        tasks.append(process_trixel(trixel_id))
+                await asyncio.gather(*tasks)
+
+                # Remove stale privatizers
+                for trixel_id in stale_privatizers:
+                    del self._privatizers[type_][trixel_id]
+
+                await self._batch_publish_measurement_station_count(tls_updates)
+
+                await crud.insert_observations(db, measurement_type=type_, updates=trixel_updates)
+                # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
+                #       also (calls to privatizer)?
+
     async def process(self):
         """
         Process privatizers in a bottom-up fashion.
@@ -348,58 +403,9 @@ class PrivacyManager:
 
         This procedure is performed for each measurement type individually.
         """
-        with get_db_session() as db:
-            # Process privatizers by type, and increasing levels
-
-            async def process_type(type_) -> None:
-                """Process trixels in bottom-up fashion for the given level."""
-                privatizers_type_subset = self._privatizers[type_]
-
-                for level in sorted(self._level_lookup.keys(), reverse=True):
-                    stale_privatizers: set[int] = set()
-
-                    trixel_updates: dict[TrixelID, TrixelUpdate] = dict()
-                    tls_updates: dict[Privatizer, NonNegativeInt] = dict()
-
-                    async def process_trixel(trixel_id) -> None:
-                        """Process a single trixel within a level."""
-                        privatizer: Privatizer = privatizers_type_subset[trixel_id]
-                        trixel_update: TrixelUpdate
-                        update_tls: bool
-                        trixel_update, update_tls = await privatizer.process()
-
-                        if update_tls:
-                            tls_updates[privatizer] = trixel_update.measurement_station_count
-
-                        if trixel_update.changed:
-                            trixel_updates[trixel_id] = trixel_update
-
-                        if privatizer.stale:
-                            stale_privatizers.add(trixel_id)
-
-                            # Insert a "trixel" state unknown update into the db
-                            if privatizer.value is not None:
-                                trixel_updates[trixel_id] = TrixelUpdate(
-                                    changed=True, value=None, sensor_count=0, measurement_station_count=0
-                                )
-
-                    tasks: list = list()
-                    for trixel_id in list(self._level_lookup[level]):
-                        if trixel_id in privatizers_type_subset:
-                            tasks.append(process_trixel(trixel_id))
-                    await asyncio.gather(*tasks)
-
-                    # Remove stale privatizers
-                    for trixel_id in stale_privatizers:
-                        del self._privatizers[type_][trixel_id]
-
-                    await self._batch_publish_measurement_station_count(tls_updates)
-
-                    crud.insert_observations(db, measurement_type=type_, updates=trixel_updates)
-                # TODO: what about timestamps? - should a TrixelUpdate contain a timestamp and the other methods
-                #       also (calls to privatizer)?
-
-            await asyncio.gather(*[process_type(type_) for type_ in self._privatizers])
+        # Process privatizers by type, with increasing levels. Perform evaluation of different types in parallel
+        tasks = [self._process_measurement_type(type_) for type_ in self._privatizers]
+        await asyncio.gather(*tasks)
 
     async def periodic_processing(self):
         """

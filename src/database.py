@@ -1,10 +1,12 @@
 """Database and session preset configuration."""
 
 from pathlib import Path
+from typing import Any, AsyncGenerator
 
-from sqlalchemy import URL, create_engine, event
+from sqlalchemy import URL, event
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import declarative_base
 
 from config_schema import Config, GlobalConfig
 
@@ -32,13 +34,13 @@ if db_config := config.tms_config.database:
 connect_args = {}
 if DATABASE_URL is None:
     Path("./config").mkdir(parents=True, exist_ok=True)
-    DATABASE_URL = "sqlite:///./config/tms_sqlite.db"
+    DATABASE_URL = "sqlite+aiosqlite:///./config/tms_sqlite.db"
     connect_args = {"check_same_thread": False}
 
-# TODO: use async engine/sessions
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_async_engine(DATABASE_URL, connect_args=connect_args)
 
-MetaSession = sessionmaker(autoflush=False, autocommit=False, bind=engine)
+MetaSession = async_sessionmaker(autoflush=False, autocommit=False, expire_on_commit=False, bind=engine)
+
 
 Base = declarative_base()
 
@@ -54,18 +56,16 @@ def set_sqlite_pragma(dbapi_connection, connection_record):
         cursor.close()
 
 
-def get_db():
+async def get_db() -> AsyncGenerator[AsyncSession, Any]:
     """Instantiate a temporary session for endpoint invocation."""
-    db = MetaSession()
-    try:
+    async with MetaSession() as db:
         yield db
-    finally:
-        db.close()
 
 
-def get_db_session():
+async def get_db_session():
     """Get a database session."""
-    return next(get_db())
+    async with engine.begin() as conn:
+        yield conn
 
 
 def except_columns(base, *exclusions: str) -> list[str]:

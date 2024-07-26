@@ -9,7 +9,7 @@ profile = "black"
 known_local_folder = ["src", "tests"]
 
 [project.optional-dependencies]
-dev = ["black", "isort", "pytest", "pytest-asyncio", "respx", "pytest-order"]
+dev = ["black", "isort", "pytest", "pytest-asyncio", "respx", "pytest-order", "pytest-asyncio"]
 
 [project]
 name = "trixelmanagementserver"
@@ -30,7 +30,8 @@ dependencies = [
     'SQLAlchemy',
     'sqlalchemy-timescaledb',
     'pynyhtm',
-    'PyJWT'
+    'PyJWT',
+    'aiosqlite',
 ]
 
 [project.urls]

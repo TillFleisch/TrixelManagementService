@@ -51,7 +51,7 @@ class Sensor(Base):
     measurement_type = Column(Integer, ForeignKey("measurement_type.id"), nullable=False)
 
     measurement_station = relationship("MeasurementStation", back_populates="sensors")
-    details = relationship("SensorDetail", back_populates="sensors")
+    details = relationship("SensorDetail", back_populates="sensors", lazy="selectin")  # codespell:ignore
     measurements = relationship("SensorMeasurement", back_populates="sensor")
 
     Index("measurement_station_sensor", measurement_station_uuid, id)

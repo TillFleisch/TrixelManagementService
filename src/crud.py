@@ -2,14 +2,16 @@
 
 from datetime import datetime, timedelta
 
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import model
 
 
-def init_measurement_type_enum(db: Session):
+async def init_measurement_type_enum(db: AsyncSession):
     """Initialize the measurement type reference enum table within the DB."""
-    existing_types: model.MeasurementType = db.query(model.MeasurementType).all()
+    query = select(model.MeasurementType)
+    existing_types: model.MeasurementType = (await db.execute(query)).scalars().all()
     existing_types: set[int, str] = set([(x.id, x.name) for x in existing_types])
 
     enum_types: set[int, str] = set()
@@ -25,11 +27,11 @@ def init_measurement_type_enum(db: Session):
     if len(new_types) > 0:
         for new_type in new_types:
             db.add(model.MeasurementType(id=new_type[0], name=new_type[1]))
-        db.commit()
+        await db.commit()
 
 
-def get_observations(
-    db: Session, trixel_id: int, types: list[model.MeasurementTypeEnum] | None = None, age: timedelta | None = None
+async def get_observations(
+    db: AsyncSession, trixel_id: int, types: list[model.MeasurementTypeEnum] | None = None, age: timedelta | None = None
 ):
     """
     Get environmental observations limited by the provided types for a trixel.
@@ -41,7 +43,7 @@ def get_observations(
     types = [type.value for type in types] if types is not None else [enum.value for enum in model.MeasurementTypeEnum]
 
     query = (
-        db.query(model.Observation)
+        select(model.Observation)
         .where(model.Observation.trixel_id == trixel_id)
         .where(model.Observation.measurement_type == model.MeasurementType.id, model.MeasurementType.name.in_(types))
     )
@@ -54,6 +56,4 @@ def get_observations(
         .order_by(model.Observation.time.desc())
         .limit(len(types))
     )
-    result = query.all()
-
-    return result
+    return (await db.execute(query)).scalars().all()

@@ -9,7 +9,8 @@ from urllib.parse import urlencode
 import jwt
 import pytest
 from conftest import client
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from trixellookupclient.models.tms_delegation import TMSDelegation
 
 import measurement_station.model as ms_model
@@ -197,8 +198,10 @@ def test_sensor_put_non_delegated_trixel_id_root(config: Config):
 
 
 @pytest.mark.order(311)
-def test_ms_delete(db: Session, preset_tls_manager: TLSManager):
+@pytest.mark.asyncio
+async def test_ms_delete(db: AsyncSession, preset_tls_manager: TLSManager):
     """Happy path for removing a measurement station."""
+    db = await db
     response = client.delete("/measurement_station", headers={"token": pytest.ms_token})
     assert response.status_code == HTTPStatus.NO_CONTENT, response.text
 
@@ -211,18 +214,19 @@ def test_ms_delete(db: Session, preset_tls_manager: TLSManager):
     ms_uuid = uuid.UUID(
         hex=jwt.decode(pytest.ms_token, options={"verify_signature": False}, algorithms=["HS256"])["ms_uuid"]
     )
-    sensor_count = db.query(ms_model.Sensor).where(ms_model.Sensor.measurement_station_uuid == ms_uuid).count()
+    query = select(func.count(ms_model.Sensor.id)).where(ms_model.Sensor.measurement_station_uuid == ms_uuid)
+    sensor_count = (await db.execute(query)).scalar_one_or_none()
     assert sensor_count == 0
 
     ms_uuid = uuid.UUID(
         hex=jwt.decode(pytest.ms_token, options={"verify_signature": False}, algorithms=["HS256"])["ms_uuid"]
     )
-    sensor_count = (
-        db.query(ms_model.SensorMeasurement)
-        .where(ms_model.SensorMeasurement.measurement_station_uuid == ms_uuid)
-        .count()
+    query = select(func.count(ms_model.SensorMeasurement.sensor_id)).where(
+        ms_model.SensorMeasurement.measurement_station_uuid == ms_uuid
     )
+    sensor_count = (await db.execute(query)).scalar_one_or_none()
     assert sensor_count == 0
+    await db.aclose()
 
 
 @pytest.mark.order(301)

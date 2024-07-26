@@ -12,6 +12,7 @@ from privatizer.privatizer import Privatizer
 from privatizer.schema import SensorLifeCycleBase, UniqueSensorId
 
 logger = get_logger(__name__)
+logger.disabled = True
 
 
 class LatestPrivatizer(Privatizer):

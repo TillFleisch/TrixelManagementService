@@ -1,9 +1,11 @@
 """Pytest configuration, fixtures and db-testing-preamble."""
 
+import asyncio
+from typing import Any, AsyncGenerator
+
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 from trixellookupclient.models.tms_delegation import TMSDelegation
 
@@ -14,47 +16,64 @@ from tls_manager import TLSManager
 from trixelmanagementserver import app, get_db
 
 # Testing preamble based on: https://fastapi.tiangolo.com/advanced/testing-database/
-DATABASE_URL = "sqlite://"
+DATABASE_URL = "sqlite+aiosqlite://"
 
-engine = create_engine(
+engine = create_async_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
 
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+TestingSessionLocal = async_sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 
 
-def override_get_db():
-    """Override the default database session retrieval with the test environment db."""
-    try:
-        db = TestingSessionLocal()
+async def override_get_db() -> AsyncGenerator[AsyncSession, Any]:
+    """Instantiate a temporary session for endpoint invocation."""
+    async with TestingSessionLocal() as db:
         yield db
-    finally:
-        db.close()
 
 
 @pytest.fixture(scope="function", name="db")
-def get_db_session():
+async def get_db_session():
     """Get a database session which can be used in tests."""
-    return next(override_get_db())
+    async for db in override_get_db():
+        return db
+
+
+async def reset_db():
+    """Drop all tables within the DB and re-instantiates the model."""
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+        await conn.run_sync(Base.metadata.create_all)
 
 
 def prepare_db():
     """Set up empty temporary test database."""
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(reset_db())
+
+    TestingSessionLocal = async_sessionmaker(autoflush=False, autocommit=False, expire_on_commit=False, bind=engine)
+
+    async def override_get_db() -> AsyncGenerator[AsyncSession, Any]:
+        """Override the default database session retrieval with the test environment db."""
+        async with TestingSessionLocal() as db:
+            yield db
 
     app.dependency_overrides[get_db] = override_get_db
-    init_measurement_type_enum(next(override_get_db()))
 
-    return override_get_db()
+    async def init_enums():
+        """Initialize/synchronize enum tables within the DB."""
+        async for db in override_get_db():
+            await init_measurement_type_enum(db)
+
+    loop.run_until_complete(init_enums())
 
 
 @pytest.fixture(scope="function")
 def empty_db():
     """Reset the test database before test execution."""
-    yield next(prepare_db())
+    prepare_db()
+    yield
 
 
 @pytest.fixture(scope="function", name="config")

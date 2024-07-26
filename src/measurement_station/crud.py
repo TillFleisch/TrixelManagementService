@@ -6,8 +6,8 @@ from secrets import token_bytes
 
 import jwt
 from pydantic import UUID4, PositiveFloat, PositiveInt
-from sqlalchemy import delete, or_, update
-from sqlalchemy.orm import Session
+from sqlalchemy import delete, func, or_, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import except_columns
 from model import MeasurementTypeEnum, Observation
@@ -17,7 +17,7 @@ from schema import TrixelID
 from . import model, schema
 
 
-def verify_ms_token(db: Session, jwt_token: bytes) -> UUID4:
+async def verify_ms_token(db: AsyncSession, jwt_token: bytes) -> UUID4:
     """
     Check measurement station authentication token validity.
 
@@ -28,19 +28,16 @@ def verify_ms_token(db: Session, jwt_token: bytes) -> UUID4:
     try:
         unverified_payload = jwt.decode(jwt_token, options={"verify_signature": False}, algorithms=["HS256"])
         uuid_: UUID4 = uuid.UUID(hex=unverified_payload["ms_uuid"])
-        if (
-            token_secret := db.query(model.MeasurementStation.token_secret)
-            .where(model.MeasurementStation.uuid == uuid_)
-            .first()
-        ):
-            jwt.decode(jwt_token, token_secret[0], algorithms=["HS256"])
+        query = select(model.MeasurementStation.token_secret).where(model.MeasurementStation.uuid == uuid_)
+        if token_secret := (await db.execute(query)).scalar_one_or_none():
+            jwt.decode(jwt_token, token_secret, algorithms=["HS256"])
             return uuid_
     except jwt.PyJWTError:
         raise PermissionError("Invalid MS authentication token.")
     raise PermissionError("Invalid MS authentication token.")
 
 
-def create_measurement_station(db: Session, k_requirement: int) -> model.MeasurementStation:
+async def create_measurement_station(db: AsyncSession, k_requirement: int) -> model.MeasurementStation:
     """
     Generate and insert a new measurement station into the DB.
 
@@ -49,13 +46,13 @@ def create_measurement_station(db: Session, k_requirement: int) -> model.Measure
     """
     ms = model.MeasurementStation(k_requirement=k_requirement, token_secret=token_bytes(256))
     db.add(ms)
-    db.commit()
-    db.refresh(ms)
+    await db.commit()
+    await db.refresh(ms)
     return ms
 
 
-def update_measurement_station(
-    db: Session, uuid_: UUID4, k_requirement: PositiveInt | None = None, active: bool | None = None
+async def update_measurement_station(
+    db: AsyncSession, uuid_: UUID4, k_requirement: PositiveInt | None = None, active: bool | None = None
 ) -> model.MeasurementStation:
     """
     Update the properties of an existing measurement station.
@@ -66,27 +63,26 @@ def update_measurement_station(
     :return: updated measurement station object
     :raises ValueError: if none of the arguments are updated
     """
-    stmt = update(model.MeasurementStation).where(model.MeasurementStation.uuid == uuid_)
+    query = update(model.MeasurementStation).where(model.MeasurementStation.uuid == uuid_)
 
     if k_requirement is None and active is None:
         raise ValueError("At least one of [k_requirement, active] must be provided.")
 
     if k_requirement is not None:
-        stmt = stmt.values(k_requirement=k_requirement)
+        query = query.values(k_requirement=k_requirement)
     if active is not None:
-        stmt = stmt.values(active=active)
+        query = query.values(active=active)
 
-    db.execute(stmt)
-    db.commit()
+    await db.execute(query)
+    await db.commit()
 
-    return (
-        db.query(*except_columns(model.MeasurementStation, "token_secret"))
-        .where(model.MeasurementStation.uuid == uuid_)
-        .one()
+    query = select(*except_columns(model.MeasurementStation, "token_secret")).where(
+        model.MeasurementStation.uuid == uuid_
     )
+    return (await db.execute(query)).one()
 
 
-def delete_measurement_station(db: Session, uuid_: UUID4) -> bool:
+async def delete_measurement_station(db: AsyncSession, uuid_: UUID4) -> bool:
     """
     Remove a measurement station and related entities from the DB.
 
@@ -95,48 +91,47 @@ def delete_measurement_station(db: Session, uuid_: UUID4) -> bool:
     """
     stmt = delete(model.MeasurementStation).where(model.MeasurementStation.uuid == uuid_)
 
-    result = db.execute(stmt)
+    result = await db.execute(stmt)
 
     if result.rowcount == 0:
         raise ValueError(f"Measurement Station with uuid {uuid_} does not exist!")
 
-    db.commit()
-    return (
-        db.query(*except_columns(model.MeasurementStation, "token_secret"))
-        .where(model.MeasurementStation.uuid == uuid_)
-        .first()
-    ) is None
+    await db.commit()
+    query = select(*except_columns(model.MeasurementStation, "token_secret")).where(
+        model.MeasurementStation.uuid == uuid_
+    )
+    return ((await db.execute(query)).scalars().first()) is None
 
 
-def get_measurement_station(db: Session, uuid_: UUID4) -> model.MeasurementStation:
+async def get_measurement_station(db: AsyncSession, uuid_: UUID4) -> model.MeasurementStation:
     """
     Get details about a measurement station.
 
     :param: The UUID of the measurement station for which details are retrieved
     :return: Details about the measurement station.
     """
-    return (
-        db.query(*except_columns(model.MeasurementStation, "token_secret"))
-        .where(model.MeasurementStation.uuid == uuid_)
-        .one()
+    query = select(*except_columns(model.MeasurementStation, "token_secret")).where(
+        model.MeasurementStation.uuid == uuid_
     )
+    return (await db.execute(query)).one()
 
 
-def get_measurement_station_count(db: Session, active: bool | None = None) -> int:
+async def get_measurement_station_count(db: AsyncSession, active: bool | None = None) -> int:
     """
     Get the number of registered measurement stations.
 
     :param active: filter by active state, use both states if None
     :return: number of measurement stations
     """
-    stmt = db.query(model.MeasurementStation)
+    query = select(func.count(model.MeasurementStation.uuid))
     if active is not None:
-        stmt = stmt.where(model.MeasurementStation.active == active)
-    return stmt.count()
+        query = query.where(model.MeasurementStation.active == active)
+
+    return (await db.execute(query)).scalar_one_or_none()
 
 
-def create_sensor(
-    db: Session,
+async def create_sensor(
+    db: AsyncSession,
     ms_uuid: UUID4,
     type_: MeasurementTypeEnum,
     accuracy: PositiveFloat | None = None,
@@ -151,28 +146,27 @@ def create_sensor(
     :param name: The name of the sensor which takes measurements
     :return: newly created sensor
     """
-    stmt = (
+    query = (
         update(model.MeasurementStation)
         .where(model.MeasurementStation.uuid == ms_uuid)
         .values(sensor_index=model.MeasurementStation.sensor_index + 1)
         .returning(model.MeasurementStation.sensor_index)
     )
-    sensor_id = db.execute(stmt).one()[0]
+    sensor_id = (await db.execute(query)).scalar_one()
 
     # use existing sensor details or add new entry
-    existing_detail_id = (
-        db.query(model.SensorDetail.id)
+    query = (
+        select(model.SensorDetail.id)
         .where(model.SensorDetail.name == sensor_name)
         .where(model.SensorDetail.accuracy == accuracy)
-        .first()
     )
-    if existing_detail_id is not None:
-        existing_detail_id = existing_detail_id[0]
-    else:
+    existing_detail_id = (await db.execute(query)).scalar_one_or_none()
+
+    if existing_detail_id is None:
         sensor_details = model.SensorDetail(name=sensor_name, accuracy=accuracy)
         db.add(sensor_details)
-        db.commit()
-        db.refresh(sensor_details)
+        await db.commit()
+        await db.refresh(sensor_details)
         existing_detail_id = sensor_details.id
 
     sensor = model.Sensor(
@@ -182,12 +176,12 @@ def create_sensor(
         sensor_detail_id=existing_detail_id,
     )
     db.add(sensor)
-    db.commit()
-    db.refresh(sensor)
+    await db.commit()
+    await db.refresh(sensor)
     return sensor
 
 
-def delete_sensor(db: Session, ms_uuid: UUID4, sensor_id: int) -> bool:
+async def delete_sensor(db: AsyncSession, ms_uuid: UUID4, sensor_id: int) -> bool:
     """
     Delete an existing sensor form a measurement station.
 
@@ -196,21 +190,20 @@ def delete_sensor(db: Session, ms_uuid: UUID4, sensor_id: int) -> bool:
     :return: True if removal was successful, False otherwise
     :raises ValueError: if the given sensor does not exist
     """
-    stmt = delete(model.Sensor).where(model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id)
-    result = db.execute(stmt)
+    query = delete(model.Sensor).where(model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id)
+    result = await db.execute(query)
 
     if result.rowcount == 0:
         raise ValueError(f"Sensor with ID {sensor_id} does not exist!")
 
-    db.commit()
-    return (
-        db.query(model.Sensor.id)
-        .where(model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id)
-        .first()
-    ) is None
+    await db.commit()
+    query = select(model.Sensor.id).where(
+        model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id
+    )
+    return ((await db.execute(query)).scalars().first()) is None
 
 
-def get_sensors(db: Session, ms_uuid: UUID4, sensor_id: int | None = None) -> list[model.Sensor]:
+async def get_sensors(db: AsyncSession, ms_uuid: UUID4, sensor_id: int | None = None) -> list[model.Sensor]:
     """
     Get details about sensors for a measurement station.
 
@@ -219,23 +212,21 @@ def get_sensors(db: Session, ms_uuid: UUID4, sensor_id: int | None = None) -> li
     :return: List of sensors with details
     :raises ValueError: If the provided sensor does not exist
     """
-    stmt = db.query(model.Sensor).where(model.Sensor.measurement_station_uuid == ms_uuid)
+    query = select(model.Sensor).where(model.Sensor.measurement_station_uuid == ms_uuid)
 
     if sensor_id is not None:
-        if (
-            db.query(model.Sensor)
-            .where(model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id)
-            .first()
-            is None
-        ):
+        sensor_query = select(model.Sensor).where(
+            model.Sensor.measurement_station_uuid == ms_uuid, model.Sensor.id == sensor_id
+        )
+        if (await db.execute(sensor_query)).scalars().first() is None:
             raise ValueError(f"Sensor with ID {sensor_id} does not exist!")
 
-        stmt = stmt.where(model.Sensor.id == sensor_id)
+        query = query.where(model.Sensor.id == sensor_id)
 
-    return stmt.all()
+    return (await db.execute(query)).scalars().all()
 
 
-def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpdate):
+async def insert_sensor_updates(db: AsyncSession, ms_uuid: UUID4, updates: schema.BatchUpdate):
     """
     Add multiple measurements for different sensors to a measurement station within the DB.
 
@@ -263,8 +254,9 @@ def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpda
             )
             db.add(new_sensor_measurement)
 
-    stmt = db.query(model.Sensor.id).where(model.Sensor.measurement_station_uuid == ms_uuid).where(or_(False, *clauses))
-    valid_sensors = set([x[0] for x in stmt.all()])
+    query = select(model.Sensor.id).where(model.Sensor.measurement_station_uuid == ms_uuid).where(or_(False, *clauses))
+    results = (await db.execute(query)).all()
+    valid_sensors = set([x[0] for x in results])
 
     if len(invalid_sensors := set(sensor_ids) - valid_sensors) > 0:
         raise ValueError(f"Invalid sensors provided: {invalid_sensors}")
@@ -272,10 +264,10 @@ def insert_sensor_updates(db: Session, ms_uuid: UUID4, updates: schema.BatchUpda
     if len(sensor_ids) != len(set(sensor_ids)):
         raise ValueError("Only one update per sensor allowed!")
 
-    db.commit()
+    await db.commit()
 
 
-def get_sensor_types(db: Session, ms_uuid: UUID4, sensor_ids: set[int]) -> dict[int, MeasurementTypeEnum]:
+async def get_sensor_types(db: AsyncSession, ms_uuid: UUID4, sensor_ids: set[int]) -> dict[int, MeasurementTypeEnum]:
     """
     Retrieve the sensor type for sensors within a measurement station.
 
@@ -284,20 +276,19 @@ def get_sensor_types(db: Session, ms_uuid: UUID4, sensor_ids: set[int]) -> dict[
     :returns: dictionary containing the measurement type for each provided sensor
     """
     lookup = dict()
-    result = (
-        db.query(model.Sensor.id, model.Sensor.measurement_type)
+    query = (
+        select(model.Sensor.id, model.Sensor.measurement_type)
         .where(model.Sensor.measurement_station_uuid == ms_uuid)
         .where(model.Sensor.id.in_(sensor_ids))
-        .all()
     )
-
+    result = (await db.execute(query)).all()
     for sensor_id, type_ in result:
         lookup[sensor_id] = MeasurementTypeEnum.get_from_id(type_)
     return lookup
 
 
-def insert_observations(
-    db: Session, measurement_type: MeasurementTypeEnum, updates: dict[TrixelID, TrixelUpdate]
+async def insert_observations(
+    db: AsyncSession, measurement_type: MeasurementTypeEnum, updates: dict[TrixelID, TrixelUpdate]
 ) -> None:
     """
     Bulk insert a set of trixel-observations into the DB.
@@ -317,5 +308,5 @@ def insert_observations(
         )
         observations.append(observation)
 
-    db.bulk_save_objects(observations)
-    db.commit()
+    db.add_all(observations)
+    await db.commit()

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, Requ
 from fastapi.responses import JSONResponse
 from pydantic import UUID4, NonNegativeInt, PositiveFloat, PositiveInt
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from common import is_active, is_delegated
 from config_schema import Config, GlobalConfig
@@ -26,9 +26,9 @@ router = APIRouter()
 config: Config = GlobalConfig.config
 
 
-def verify_ms_token(
+async def verify_ms_token(
     token: Annotated[str, Header(description="Measurement station authentication token.")],
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> UUID4:
     """
     Dependency which adds the token header attribute for measurement station authentication and performs validation.
@@ -37,7 +37,7 @@ def verify_ms_token(
     :raises PermissionError: if the provided token is invalid
     """
     try:
-        ms_uuid = crud.verify_ms_token(db, jwt_token=token)
+        ms_uuid = await crud.verify_ms_token(db, jwt_token=token)
         return ms_uuid
     except PermissionError:
         raise HTTPException(
@@ -56,14 +56,14 @@ def verify_ms_token(
     status_code=HTTPStatus.CREATED,
     dependencies=[Depends(is_active)],
 )
-def post_measurement_station(
+async def post_measurement_station(
     k_requirement: Annotated[
         PositiveInt,
         Query(
             description="The k-anonymity requirement, which is enforced for this measurement station and it's sensors.",
         ),
     ] = 3,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> schema.MeasurementStationCreate:
     """
     Register a new measurement station at this TMS.
@@ -71,7 +71,7 @@ def post_measurement_station(
     The measurement station token can be used to register and update sensors.
     Store the token properly, it is only transferred once!
     """
-    result = crud.create_measurement_station(db, k_requirement=k_requirement)
+    result = await crud.create_measurement_station(db, k_requirement=k_requirement)
 
     payload = {"iat": datetime.now(tz=timezone.utc), "ms_uuid": result.uuid.hex}
     jwt_token = jwt.encode(payload, result.token_secret, algorithm="HS256")
@@ -96,7 +96,7 @@ def post_measurement_station(
     },
     dependencies=[Depends(is_active)],
 )
-def put_measurement_station(
+async def put_measurement_station(
     k_requirement: Annotated[
         PositiveInt,
         Query(
@@ -104,10 +104,10 @@ def put_measurement_station(
         ),
     ] = 3,
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> schema.MeasurementStation:
     """Update an existing measurement station."""
-    return crud.update_measurement_station(db, uuid_=ms_uuid, k_requirement=k_requirement)
+    return await crud.update_measurement_station(db, uuid_=ms_uuid, k_requirement=k_requirement)
 
 
 @router.delete(
@@ -127,13 +127,13 @@ def put_measurement_station(
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.NO_CONTENT,
 )
-def delete_measurement_station(
+async def delete_measurement_station(
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete an existing measurement station from the DB."""
     try:
-        if crud.delete_measurement_station(db, ms_uuid):
+        if await crud.delete_measurement_station(db, ms_uuid):
             return
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Measurement station does not exist!")
@@ -155,12 +155,12 @@ def delete_measurement_station(
     },
     dependencies=[Depends(is_active)],
 )
-def get_measurement_station_detail(
+async def get_measurement_station_detail(
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> schema.MeasurementStation:
     """Delete an existing measurement station from the DB."""
-    return crud.get_measurement_station(db, ms_uuid)
+    return await crud.get_measurement_station(db, ms_uuid)
 
 
 @router.get(
@@ -174,12 +174,12 @@ def get_measurement_station_detail(
     },
     dependencies=[Depends(is_active)],
 )
-def get_measurement_station_count(
+async def get_measurement_station_count(
     active: Annotated[bool | None, Query(description="Filters by active state. Use both states if None.")] = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Get the current number of registered measurement stations."""
-    return {"value": crud.get_measurement_station_count(db, active=active)}
+    return {"value": await crud.get_measurement_station_count(db, active=active)}
 
 
 @router.post(
@@ -198,17 +198,17 @@ def get_measurement_station_count(
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.CREATED,
 )
-def post_sensor(
+async def post_sensor(
     type: Annotated[MeasurementTypeEnum, Query(description="Type of measurement acquired by this sensor.")],
     accuracy: Annotated[
         PositiveFloat | None, Query(description="Accuracy of the sensor (true observation within +/- accuracy).")
     ] = None,
     sensor_name: Annotated[str | None, Query(description="Name of the sensor which takes measurements.")] = None,
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> schema.SensorDetailed:
     """Create a new sensor for a measurement station."""
-    return crud.create_sensor(db, ms_uuid=ms_uuid, type_=type, accuracy=accuracy, sensor_name=sensor_name)
+    return await crud.create_sensor(db, ms_uuid=ms_uuid, type_=type, accuracy=accuracy, sensor_name=sensor_name)
 
 
 @router.get(
@@ -226,12 +226,12 @@ def post_sensor(
     },
     dependencies=[Depends(is_active)],
 )
-def get_sensors(
+async def get_sensors(
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> list[schema.SensorDetailed]:
     """Get a list of sensors which are registered for a measurement station."""
-    return crud.get_sensors(db, ms_uuid=ms_uuid)
+    return await crud.get_sensors(db, ms_uuid=ms_uuid)
 
 
 @router.delete(
@@ -251,14 +251,14 @@ def get_sensors(
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.NO_CONTENT,
 )
-def delete_sensor(
+async def delete_sensor(
     sensor_id: Annotated[NonNegativeInt, Path(description="ID of the sensor which should be removed.")],
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Delete a sensor form a measurement station."""
     try:
-        if crud.delete_sensor(db, ms_uuid=ms_uuid, sensor_id=sensor_id):
+        if await crud.delete_sensor(db, ms_uuid=ms_uuid, sensor_id=sensor_id):
             return
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
@@ -281,20 +281,20 @@ def delete_sensor(
     },
     dependencies=[Depends(is_active)],
 )
-def get_sensor(
+async def get_sensor(
     sensor_id: Annotated[NonNegativeInt, Path(description="ID of the sensor for which details are retrieved.")],
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> schema.SensorDetailed:
     """Get details about a specific sensor for a measurement station."""
     try:
-        return crud.get_sensors(db, ms_uuid=ms_uuid, sensor_id=sensor_id)[0]
+        return (await crud.get_sensors(db, ms_uuid=ms_uuid, sensor_id=sensor_id))[0]
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
 
 
-def store_and_process_updates(
-    db: Session,
+async def store_and_process_updates(
+    db: AsyncSession,
     ms_uuid: UUID4,
     updates: schema.BatchUpdate,
     privacy_manager: PrivacyManager,
@@ -308,7 +308,7 @@ def store_and_process_updates(
     :raises HTTPException: on invalid input
     :return: None or JSONResponse if the client should adjust settings
     """
-    k_requirement = crud.get_measurement_station(db, ms_uuid).k_requirement
+    k_requirement = (await crud.get_measurement_station(db, ms_uuid)).k_requirement
     # TODO: optional - ascertain that all trixels have the same parent - should not be possible if clients are behaving
 
     invalid_trixels = set()
@@ -327,12 +327,12 @@ def store_and_process_updates(
             for measurement in measurements:
                 sensor_ids.add(measurement.sensor_id)
 
-        measurement_type_reference = crud.get_sensor_types(db, ms_uuid=ms_uuid, sensor_ids=sensor_ids)
+        measurement_type_reference = await crud.get_sensor_types(db, ms_uuid=ms_uuid, sensor_ids=sensor_ids)
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
 
     try:
-        crud.insert_sensor_updates(db, ms_uuid=ms_uuid, updates=updates)
+        await crud.insert_sensor_updates(db, ms_uuid=ms_uuid, updates=updates)
         # TODO: add purge job for old data - keep statistics
 
         # Submit to privatizers for contribution in trixels
@@ -403,7 +403,7 @@ def store_and_process_updates(
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.OK,
 )
-def put_sensor_update(
+async def put_sensor_update(
     request: Request,
     trixel_id: Annotated[schema.TrixelID, Path(description="The Trixel to which the sensor contributes.")],
     sensor_id: Annotated[
@@ -415,13 +415,13 @@ def put_sensor_update(
         datetime | NonNegativeInt, Query(description="Point in time at which the measurement was taken (unix time).")
     ],
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Publish a single sensor value update to the TMS which is stored and processed within the desired trixel."""
     measurement = schema.Measurement(sensor_id=sensor_id, value=value, timestamp=timestamp)
     batch_update: schema.BatchUpdate = {trixel_id: [measurement]}
 
-    return store_and_process_updates(db, ms_uuid, batch_update, request.app.privacy_manager)
+    return await store_and_process_updates(db, ms_uuid, batch_update, request.app.privacy_manager)
 
 
 @router.put(
@@ -453,11 +453,11 @@ def put_sensor_update(
     dependencies=[Depends(is_active)],
     status_code=HTTPStatus.OK,
 )
-def put_sensor_batch_update(
+async def put_sensor_batch_update(
     request: Request,
     updates: schema.BatchUpdate,
     ms_uuid: UUID4 = Depends(verify_ms_token),
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ):
     """Publish multiple sensor updates to the TMS which are stored and processed within the desired trixels."""
-    return store_and_process_updates(db, ms_uuid, updates, request.app.privacy_manager)
+    return await store_and_process_updates(db, ms_uuid, updates, request.app.privacy_manager)

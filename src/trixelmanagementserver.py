@@ -11,7 +11,7 @@ import packaging.version
 import uvicorn
 from fastapi import Depends, FastAPI, Path, Query
 from pydantic import NonNegativeInt
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import Response
 
 import crud
@@ -34,7 +34,6 @@ from tls_manager import TLSManager
 api_version = importlib.metadata.version("trixelmanagementserver")
 config: Config = GlobalConfig.config
 
-model.Base.metadata.create_all(bind=engine)
 
 logger = get_logger(__name__)
 
@@ -44,7 +43,10 @@ openapi_tags = [{"name": TAG_MEASUREMENT_STATION}, {"name": TAG_TRIXELS}]
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan actions executed before and after FastAPI."""
-    init_measurement_type_enum(next(get_db()))
+    async with engine.begin() as conn:
+        await conn.run_sync(model.Base.metadata.create_all)
+    async for db in get_db():
+        await init_measurement_type_enum(db)
     asyncio.create_task(app.tls_manger.start())
     asyncio.create_task(app.privacy_manager.periodic_processing())
     yield
@@ -77,7 +79,7 @@ app.privacy_manager = PrivacyManager(tls_manager=app.tls_manger, privatizer_clas
     name="Ping",
     summary="ping ... pong",
 )
-def ping() -> schema.Ping:
+async def ping() -> schema.Ping:
     """Return a basic ping message."""
     return schema.Ping()
 
@@ -87,7 +89,7 @@ def ping() -> schema.Ping:
     name="Version",
     summary="Get the precise current semantic version.",
 )
-def get_semantic_version() -> schema.Version:
+async def get_semantic_version() -> schema.Version:
     """Get the precise version of the currently running API."""
     return schema.Version(version=api_version)
 
@@ -102,7 +104,7 @@ def get_semantic_version() -> schema.Version:
     },
     dependencies=[Depends(is_active)],
 )
-def get_active() -> Response:
+async def get_active() -> Response:
     """Get the active status of this TMS."""
     return Response(status_code=HTTPStatus.OK)
 
@@ -120,7 +122,7 @@ def get_active() -> Response:
     },
     dependencies=[Depends(is_active)],
 )
-def get_observation(
+async def get_observation(
     trixel_id: Annotated[TrixelID, Path(description="The trixel for which observations are retrieved.")],
     types: Annotated[
         List[model.MeasurementTypeEnum],
@@ -131,10 +133,10 @@ def get_observation(
     age: Annotated[
         NonNegativeInt | None, Query(description="Maximum age of measurement timestamps in seconds.")
     ] = None,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> list[schema.Observation]:
     """Retrieve the latest measurement for the provided types for a trixel from the DB."""
-    return crud.get_observations(db, trixel_id, types, age=None if age is None else timedelta(seconds=int(age)))
+    return await crud.get_observations(db, trixel_id, types, age=None if age is None else timedelta(seconds=int(age)))
 
 
 def main() -> None:

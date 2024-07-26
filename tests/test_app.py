@@ -2,7 +2,8 @@
 
 import pytest
 from conftest import client
-from sqlalchemy.orm import Session
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import model
 
@@ -24,10 +25,13 @@ def test_version():
 
 
 @pytest.mark.order(100)
-def test_measurement_type_enums(empty_db: Session):
+@pytest.mark.asyncio
+async def test_measurement_type_enums(empty_db, db: AsyncSession):
     """Test if the measurement enum relation contains entries."""
-    types = empty_db.query(model.MeasurementType.name).all()
-    types = [type_[0] for type_ in types]
+    db = await db
+    query = select(model.MeasurementType.name)
+    types_ = (await db.execute(query)).scalars().all()
 
     for enum in model.MeasurementTypeEnum:
-        assert enum.value in types
+        assert enum.value in types_
+    await db.aclose()

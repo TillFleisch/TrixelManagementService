@@ -7,9 +7,9 @@ RUN pip install --no-cache-dir --force-reinstall dist/*.whl
 
 # Add adapter requirements for postgres/timescaledb
 RUN apk update \
-    && apk add --virtual build-deps gcc libpq-dev python3-dev musl-dev\
+    && apk add --virtual build-deps gcc python3-dev musl-dev\
     && apk add --no-cache libpq-dev
-RUN pip install --no-cache-dir cryptography psycopg2
+RUN pip install --no-cache-dir cryptography asyncpg
 RUN apk del build-deps
 
 EXPOSE 80
