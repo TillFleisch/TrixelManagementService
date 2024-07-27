@@ -97,6 +97,7 @@ async def post_measurement_station(
     dependencies=[Depends(is_active)],
 )
 async def put_measurement_station(
+    request: Request,
     k_requirement: Annotated[
         PositiveInt,
         Query(
@@ -107,6 +108,8 @@ async def put_measurement_station(
     db: AsyncSession = Depends(get_db),
 ) -> schema.MeasurementStation:
     """Update an existing measurement station."""
+    manager: PrivacyManager = request.app.privacy_manager
+    manager.set_k_requirement(ms_uuid, k_requirement)
     return await crud.update_measurement_station(db, uuid_=ms_uuid, k_requirement=k_requirement)
 
 

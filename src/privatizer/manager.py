@@ -62,7 +62,6 @@ class PrivacyManager:
 
     # LUT which contains the k requirement for different measurement stations.
     _k_map: dict[UUID4, int]
-    # TODO: should also be updated if the client changes the value (via endpoint)
 
     def __init__(self, tls_manager: TLSManager, privatizer_class: Type[Privatizer]):
         """Initialize the Privacy manager with no privatizers and sensors."""
@@ -121,7 +120,7 @@ class PrivacyManager:
 
     def get_k_requirement(self, id_: UniqueSensorId | UUID4) -> PositiveInt:
         """
-        Get the k requirement for a sensor.
+        Get the k requirement for a sensor or measurement station.
 
         :param id_: Unique sensor id or the ID of the measurement station to which the sensor belongs
         :returns: k requirement which must be met for the sensor
@@ -130,6 +129,18 @@ class PrivacyManager:
             return self._k_map.get(id_.ms_uuid, None)
         else:
             return self._k_map.get(id_, None)
+
+    def set_k_requirement(self, id_: UniqueSensorId | UUID4, k_requirement: PositiveInt):
+        """
+        Set the k requirement for a sensor or measurement station.
+
+        :param id_: Unique sensor id or the ID of the measurement station to which the sensor belongs
+        :param k_requirement: new k requirement value
+        """
+        if isinstance(id_, UniqueSensorId):
+            self._k_map[id_.ms_uuid] = k_requirement
+        else:
+            self._k_map[id_] = k_requirement
 
     def remove_sensor(self, unique_sensor_id: UniqueSensorId):
         """
