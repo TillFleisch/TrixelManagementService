@@ -2,9 +2,10 @@
 
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import measurement_station.model
 import model
 
 
@@ -38,7 +39,7 @@ async def get_observations(
 
     :param trixel_id: the trixel for which measurements are retrieved
     :param types: set of types for which measurements are retrieved, if non all types are used
-    :param age: timedelta which defined the oldest allowed timestamps
+    :param age: timedelta which defines the oldest allowed timestamps
     """
     types = [type.value for type in types] if types is not None else [enum.value for enum in model.MeasurementTypeEnum]
 
@@ -57,3 +58,16 @@ async def get_observations(
         .limit(len(types))
     )
     return (await db.execute(query)).scalars().all()
+
+
+async def purge_old_sensor_data(db: AsyncSession, age: timedelta):
+    """
+    Delete old sensor data that is older than the given age.
+
+    :param age: timedelta which defines which data form the past is kept
+    """
+    query = delete(measurement_station.model.SensorMeasurement).where(
+        measurement_station.model.SensorMeasurement.time < datetime.now() - age
+    )
+    await db.execute(query)
+    await db.commit()

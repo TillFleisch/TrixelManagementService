@@ -2,6 +2,7 @@
 
 import logging
 import sys
+from datetime import timedelta
 from enum import IntEnum
 from typing import Any, Literal, Optional, Tuple, Type
 
@@ -105,6 +106,8 @@ class Config(BaseSettings):
     model_config = SettingsConfigDict(toml_file="config/config.toml")
     trixel_update_frequency: NonNegativeInt = 60
     privatizer: Literal["blank", "latest"] = "blank"
+    sensor_data_purge_interval: timedelta = timedelta(hours=1)
+    sensor_data_keep_interval: timedelta = timedelta(weeks=2)
 
     @classmethod
     def settings_customise_sources(

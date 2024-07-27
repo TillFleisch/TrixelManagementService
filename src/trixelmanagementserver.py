@@ -3,7 +3,7 @@
 import asyncio
 import importlib
 from contextlib import asynccontextmanager
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from typing import Annotated, List
 
@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
         await init_measurement_type_enum(db)
     asyncio.create_task(app.tls_manger.start())
     asyncio.create_task(app.privacy_manager.periodic_processing())
+    asyncio.create_task(purge_sensor_data_job())
     yield
 
 
@@ -72,6 +73,16 @@ if config.privatizer == "blank":
 elif config.privatizer == "latest":
     privatizer_class = LatestPrivatizer
 app.privacy_manager = PrivacyManager(tls_manager=app.tls_manger, privatizer_class=privatizer_class)
+
+
+async def purge_sensor_data_job():
+    """Delete old sensor data periodically."""
+    while True:
+        async for db in get_db():
+            age = config.sensor_data_keep_interval
+            logger.info(f"Purging sensor data older than: {datetime.now() - age}")
+            await crud.purge_old_sensor_data(db, age)
+        await asyncio.sleep(config.sensor_data_purge_interval.total_seconds())
 
 
 @app.get(
