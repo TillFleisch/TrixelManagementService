@@ -1,5 +1,6 @@
 """Measurement station and related database wrappers."""
 
+import asyncio
 import uuid
 from datetime import datetime
 from secrets import token_bytes
@@ -15,6 +16,8 @@ from privatizer.schema import TrixelUpdate
 from schema import TrixelID
 
 from . import model, schema
+
+lock_create_sensor_detail = asyncio.Lock()
 
 
 async def verify_ms_token(db: AsyncSession, jwt_token: bytes) -> UUID4:
@@ -146,28 +149,30 @@ async def create_sensor(
     :param name: The name of the sensor which takes measurements
     :return: newly created sensor
     """
-    query = (
-        update(model.MeasurementStation)
-        .where(model.MeasurementStation.uuid == ms_uuid)
-        .values(sensor_index=model.MeasurementStation.sensor_index + 1)
-        .returning(model.MeasurementStation.sensor_index)
-    )
-    sensor_id = (await db.execute(query)).scalar_one()
+    existing_detail_id = None
+    async with lock_create_sensor_detail:
+        query = (
+            update(model.MeasurementStation)
+            .where(model.MeasurementStation.uuid == ms_uuid)
+            .values(sensor_index=model.MeasurementStation.sensor_index + 1)
+            .returning(model.MeasurementStation.sensor_index)
+        )
+        sensor_id = (await db.execute(query)).scalar_one()
 
-    # use existing sensor details or add new entry
-    query = (
-        select(model.SensorDetail.id)
-        .where(model.SensorDetail.name == sensor_name)
-        .where(model.SensorDetail.accuracy == accuracy)
-    )
-    existing_detail_id = (await db.execute(query)).scalar_one_or_none()
+        # use existing sensor details or add new entry
+        query = (
+            select(model.SensorDetail.id)
+            .where(model.SensorDetail.name == sensor_name)
+            .where(model.SensorDetail.accuracy == accuracy)
+        )
+        existing_detail_id = (await db.execute(query)).scalar_one_or_none()
 
-    if existing_detail_id is None:
-        sensor_details = model.SensorDetail(name=sensor_name, accuracy=accuracy)
-        db.add(sensor_details)
-        await db.commit()
-        await db.refresh(sensor_details)
-        existing_detail_id = sensor_details.id
+        if existing_detail_id is None:
+            sensor_details = model.SensorDetail(name=sensor_name, accuracy=accuracy)
+            db.add(sensor_details)
+            await db.commit()
+            await db.refresh(sensor_details)
+            existing_detail_id = sensor_details.id
 
     sensor = model.Sensor(
         id=sensor_id - 1,

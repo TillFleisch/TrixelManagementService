@@ -3,6 +3,7 @@
 import enum
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Column,
     DateTime,
@@ -53,7 +54,7 @@ class Observation(Base):
     __tablename__ = "observation"
 
     time = Column(DateTime(timezone=True), primary_key=True)
-    trixel_id = Column(Integer, primary_key=True)
+    trixel_id = Column(BigInteger, primary_key=True)
     measurement_type = Column(Integer, ForeignKey("measurement_type.id"))
     value = Column(Float)
     sensor_count = Column(Integer, default=0, nullable=False)

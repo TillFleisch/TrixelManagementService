@@ -141,7 +141,8 @@ class PrivacyManager:
 
         :param unique_sensor_id: The ID of the sensor which should be removed
         """
-        if existing_privatizer := self._sensor_map[unique_sensor_id]:
+        if unique_sensor_id in self._sensor_map:
+            existing_privatizer = self._sensor_map[unique_sensor_id]
             existing_privatizer.remove_sensor(unique_sensor_id)
             if existing_parent_privatizer := existing_privatizer._parent_privatizer:
                 existing_parent_privatizer.remove_sensor(unique_sensor_id)
