@@ -17,7 +17,7 @@ from sqlalchemy import (
 from database import Base
 
 
-class MeasurementTypeEnum(str, enum.Enum):
+class MeasurementTypeEnum(enum.StrEnum):
     """Supported measurement types."""
 
     # A string enum is used, so that the value can be used in urls.

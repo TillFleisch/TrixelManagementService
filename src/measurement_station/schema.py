@@ -21,7 +21,7 @@ from model import MeasurementTypeEnum
 from schema import TrixelID
 
 
-class TrixelLevelChange(str, enum.Enum):
+class TrixelLevelChange(enum.StrEnum):
     """Enum which indicates the actions which should be taken by a client to maintain the k-anonymity requirement."""
 
     KEEP = "keep"
@@ -29,7 +29,7 @@ class TrixelLevelChange(str, enum.Enum):
     DECREASE = "decrease"
 
 
-class SeeOtherReason(str, enum.Enum):
+class SeeOtherReason(enum.StrEnum):
     """Enum which indicates the reason for a see other status code."""
 
     WRONG_TMS = "wrong_tms"
