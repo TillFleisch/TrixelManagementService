@@ -33,7 +33,7 @@ async def init_measurement_type_enum(db: AsyncSession):
 
 async def get_observations(
     db: AsyncSession, trixel_id: int, types: list[model.MeasurementTypeEnum] | None = None, age: timedelta | None = None
-):
+) -> list[model.Observation]:
     """
     Get environmental observations limited by the provided types for a trixel.
 
@@ -53,11 +53,22 @@ async def get_observations(
         query = query.where(model.Observation.time > datetime.now() - age)
 
     query = (
-        query.group_by(model.Observation.measurement_type, model.Observation.time)
+        query.group_by(model.Observation.measurement_type, model.Observation.time, model.Observation.trixel_id)
         .order_by(model.Observation.time.desc())
         .limit(len(types))
     )
-    return (await db.execute(query)).scalars().all()
+    result = (await db.execute(query)).scalars().all()
+
+    # remove duplicate entries, would require sub-query in sql
+    # assume that the number of measurement types is comparatively small, therefore this is acceptable
+    seen_types: set[int] = set()
+    clean_result: list[model.Observation] = list()
+    for result in result:
+        if result.measurement_type not in seen_types:
+            seen_types.add(result.measurement_type)
+            clean_result.append(result)
+
+    return clean_result
 
 
 async def purge_old_sensor_data(db: AsyncSession, age: timedelta):
