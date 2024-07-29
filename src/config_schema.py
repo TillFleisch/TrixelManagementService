@@ -105,7 +105,7 @@ class Config(BaseSettings):
     tms_config: TMSConfig
     model_config = SettingsConfigDict(toml_file="config/config.toml")
     trixel_update_frequency: NonNegativeInt = 60
-    privatizer: Literal["blank", "latest"] = "blank"
+    privatizer: Literal["blank", "latest", "naive_average"] = "blank"
     sensor_data_purge_interval: timedelta = timedelta(hours=1)
     sensor_data_keep_interval: timedelta = timedelta(weeks=2)
 
