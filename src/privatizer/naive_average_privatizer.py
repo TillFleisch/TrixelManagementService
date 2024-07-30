@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from pydantic import UUID4
+from pydantic import UUID4, NonNegativeInt
 from typing_extensions import override
 
 from logging_helper import get_logger
@@ -25,6 +25,12 @@ MISSED_UPDATE_THRESHOLD = 2
 
 """Smoothing weight which is used for new values while determining the average update interval."""
 UPDATE_INTERVAL_WEIGHT = 0.1
+
+"""Exponential smoothing factor which is applied to the aggregate local measurements."""
+SMOOTH_FACTOR_LOCAL = 0.5
+
+"""Exponential smoothing factor which is applied to the aggregate subtrixel measurements."""
+SMOOTH_FACTOR_CHILD_TRIXEL = 1
 
 
 class NaiveAveragePrivatizer(Privatizer):
@@ -128,6 +134,14 @@ class NaiveAveragePrivatizer(Privatizer):
 
         self.last_measurement_timestamp[unique_sensor_id] = timestamp
 
+    def filter_local_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
+        """Filter operation which is applied to the sum of local measurements before combination with child values."""
+        return value
+
+    def filter_child_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
+        """Filter operation which is applied to the sum of child measurements before combination with local values."""
+        return value
+
     @override
     def get_value(self) -> float | None:
         """
@@ -137,7 +151,8 @@ class NaiveAveragePrivatizer(Privatizer):
         The trixel returns the 'unknown'(None) state if there are no contributors within the (sub-)trixel.
         """
         local_sum: float | None = None
-        total_contributor_count = 0
+        total_local_contributor_count: int = 0
+        total_child_contributor_count: int = 0
 
         for sensor in self.sensors:
             if not self.sensor_in_shadow_mode(sensor):
@@ -150,7 +165,7 @@ class NaiveAveragePrivatizer(Privatizer):
                 if measurement is not None:
                     local_sum = 0 if local_sum is None else local_sum
                     local_sum += measurement
-                    total_contributor_count += 1
+                    total_local_contributor_count += 1
 
         child_sum: float | None = None
         for child in self._children or set():
@@ -160,12 +175,73 @@ class NaiveAveragePrivatizer(Privatizer):
                 child_contributor_count = child_privatizer.get_total_contributing_sensor_count()
                 child_sum = 0 if child_sum is None else child_sum
                 child_sum += child_privatizer.value * child_contributor_count
-                total_contributor_count += child_contributor_count
+                total_child_contributor_count += child_contributor_count
 
         if local_sum is None and child_sum is None:
             return None
 
+        local_sum = self.filter_local_sum(local_sum, total_local_contributor_count)
+        child_sum = self.filter_child_sum(child_sum, total_child_contributor_count)
+
         local_sum = 0 if local_sum is None else local_sum
         child_sum = 0 if child_sum is None else child_sum
 
-        return (local_sum + child_sum) / total_contributor_count
+        return (local_sum + child_sum) / (total_local_contributor_count + total_child_contributor_count)
+
+
+class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
+    """Like NAP, additionally applies exponential smoothing separately to local and subtrixel measurements."""
+
+    last_value: float | None = None
+    last_contributor_count: NonNegativeInt | None = None
+
+    last_value_child: float | None = None
+    last_contributor_count_child: NonNegativeInt | None = None
+
+    @override
+    def filter_local_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
+        """Apply exponential smoothing to local measurements."""
+        if SMOOTH_FACTOR_LOCAL == 1:
+            return value
+
+        if value is None:
+            self.last_value = None
+            self.last_contributor_count = None
+            return None
+        elif self.last_value is None:
+            self.last_value = value
+            self.last_contributor_count = contributor_count
+            return value
+        else:
+            # Compensate for sum size when the number of contributors changes
+            if contributor_count != self.last_contributor_count and self.last_contributor_count > 0:
+                self.last_value = (self.last_value / self.last_contributor_count) * contributor_count
+
+            value = self.last_value * (1 - SMOOTH_FACTOR_LOCAL) + value * SMOOTH_FACTOR_LOCAL
+            self.last_value = value
+            self.last_contributor_count = contributor_count
+            return value
+
+    @override
+    def filter_child_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
+        """Apply exponential smoothing to child trixel measurements."""
+        if SMOOTH_FACTOR_CHILD_TRIXEL == 1:
+            return value
+
+        if value is None:
+            self.last_value_child = None
+            self.last_contributor_count_child = None
+            return None
+        elif self.last_value_child is None:
+            self.last_value_child = value
+            self.last_contributor_count_child = contributor_count
+            return value
+        else:
+            # Compensate for sum size when the number of contributors changes
+            if contributor_count != self.last_contributor_count_child and self.last_contributor_count_child > 0:
+                self.last_value_child = (self.last_value_child / self.last_contributor_count_child) * contributor_count
+
+            value = self.last_value_child * (1 - SMOOTH_FACTOR_CHILD_TRIXEL) + value * SMOOTH_FACTOR_CHILD_TRIXEL
+            self.last_value_child = value
+            self.last_contributor_count_child = contributor_count
+            return value

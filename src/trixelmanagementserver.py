@@ -27,7 +27,10 @@ from measurement_station.measurement_station import router as measurement_statio
 from privatizer.blank_privatizer import BlankPrivatizer
 from privatizer.latest_privatizer import LatestPrivatizer
 from privatizer.manager import PrivacyManager
-from privatizer.naive_average_privatizer import NaiveAveragePrivatizer
+from privatizer.naive_average_privatizer import (
+    NaiveAveragePrivatizer,
+    NaiveSmoothingAveragePrivatizer,
+)
 from privatizer.privatizer import Privatizer
 from schema import TrixelID
 from tls_manager import TLSManager
@@ -75,6 +78,8 @@ elif config.privatizer == "latest":
     privatizer_class = LatestPrivatizer
 elif config.privatizer == "naive_average":
     privatizer_class = NaiveAveragePrivatizer
+elif config.privatizer == "naive_smoothing_average":
+    privatizer_class = NaiveSmoothingAveragePrivatizer
 app.privacy_manager = PrivacyManager(tls_manager=app.tls_manger, privatizer_class=privatizer_class)
 
 
