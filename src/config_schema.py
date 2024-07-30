@@ -4,7 +4,7 @@ import logging
 import sys
 from datetime import timedelta
 from enum import IntEnum
-from typing import Any, Literal, Optional, Tuple, Type
+from typing import Any, Optional, Tuple, Type
 
 from pydantic import (
     BaseModel,
@@ -23,6 +23,8 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 from trixellookupclient.models import TMSDelegation
+
+from privatizer.config_schema import AvailablePrivatizerConfigs, BlankPrivatizerConfig
 
 
 class LogLevel(IntEnum):
@@ -105,7 +107,7 @@ class Config(BaseSettings):
     tms_config: TMSConfig
     model_config = SettingsConfigDict(toml_file="config/config.toml")
     trixel_update_frequency: NonNegativeInt = 60
-    privatizer: Literal["blank", "latest", "naive_average", "naive_smoothing_average"] = "blank"
+    privatizer_config: AvailablePrivatizerConfigs
     sensor_data_purge_interval: timedelta = timedelta(hours=1)
     sensor_data_keep_interval: timedelta = timedelta(weeks=2)
 
@@ -127,6 +129,7 @@ class TestConfig(Config):
 
     __test__ = False
     model_config = SettingsConfigDict(toml_file=None)
+    privatizer_config: BlankPrivatizerConfig = BlankPrivatizerConfig()
     tls_config: TLSConfig = TLSConfig(host="sausage.dog.local")
     tms_config: TMSConfig = TMSConfig(host="wiener.dog.local", database=TMSDatabaseConfig(use_sqlite=True))
 

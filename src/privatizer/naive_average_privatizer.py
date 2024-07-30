@@ -1,36 +1,23 @@
 """Naive average privatizer, which determines the average of all contributing sensors without further considerations."""
 
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from pydantic import UUID4, NonNegativeInt
 from typing_extensions import override
 
+from config_schema import GlobalConfig
 from logging_helper import get_logger
 from measurement_station.schema import Measurement
 from model import MeasurementTypeEnum
+from privatizer.config_schema import (
+    NaiveAveragePrivatizerConfig,
+    NaiveSmoothingAveragePrivatizerConfig,
+)
 from privatizer.privatizer import Privatizer
 from privatizer.schema import SensorLifeCycleBase, UniqueSensorId
 
 logger = get_logger(__name__)
-
-"""The oldest allowed age for incoming measurement and stale measurement station detection"""
-MAX_MEASUREMENT_AGE = timedelta(minutes=5)
-
-"""The oldest allowed age of measurements, which used during averaging."""
-MAX_MEASUREMENT_AGE_AVERAGING = timedelta(minutes=2.5)
-
-"""Number of allowed missed sensor updates in comparison to the average update interval of the sensor."""
-MISSED_UPDATE_THRESHOLD = 2
-
-"""Smoothing weight which is used for new values while determining the average update interval."""
-UPDATE_INTERVAL_WEIGHT = 0.1
-
-"""Exponential smoothing factor which is applied to the aggregate local measurements."""
-SMOOTH_FACTOR_LOCAL = 0.5
-
-"""Exponential smoothing factor which is applied to the aggregate subtrixel measurements."""
-SMOOTH_FACTOR_CHILD_TRIXEL = 1
 
 
 class NaiveAveragePrivatizer(Privatizer):
@@ -46,6 +33,8 @@ class NaiveAveragePrivatizer(Privatizer):
     last_measurement: dict[UniqueSensorId, float | None]
     last_measurement_timestamp: dict[UniqueSensorId, datetime]
     update_interval: dict[UniqueSensorId, timedelta]
+
+    config: ClassVar[NaiveAveragePrivatizerConfig] = GlobalConfig.config.privatizer_config
 
     def __init__(
         self,
@@ -69,6 +58,8 @@ class NaiveAveragePrivatizer(Privatizer):
         self.last_measurement_timestamp = dict()
         self.update_interval = dict()
 
+        logger.disabled = not NaiveAveragePrivatizer.config.logging
+
     @override
     def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> bool:
         """Accept every sensor as a contributor."""
@@ -79,6 +70,7 @@ class NaiveAveragePrivatizer(Privatizer):
     @override
     def pre_processing(self):
         """Detect and remove stale sensors."""
+        config: NaiveAveragePrivatizerConfig = NaiveAveragePrivatizer.config
         sensors_to_remove: set[UniqueSensorId] = set()
         for sensor in self.sensors:
             if sensor not in self.last_measurement:
@@ -86,9 +78,12 @@ class NaiveAveragePrivatizer(Privatizer):
 
             last_timestamp = self.last_measurement_timestamp[sensor]
             time_delta = datetime.now() - last_timestamp
-            if sensor in self.update_interval and time_delta > self.update_interval[sensor] * MISSED_UPDATE_THRESHOLD:
+            if (
+                sensor in self.update_interval
+                and time_delta > self.update_interval[sensor] * config.missed_update_threshold
+            ):
                 sensors_to_remove.add(sensor)
-            elif time_delta > MAX_MEASUREMENT_AGE * MISSED_UPDATE_THRESHOLD:
+            elif time_delta > config.max_measurement_age * config.missed_update_threshold:
                 sensors_to_remove.add(sensor)
 
         for sensor in sensors_to_remove:
@@ -109,6 +104,8 @@ class NaiveAveragePrivatizer(Privatizer):
     @override
     def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
         """Store and update measurement related information (update interval, time of measurement)."""
+        config: NaiveAveragePrivatizerConfig = NaiveAveragePrivatizer.config
+
         self.last_measurement[unique_sensor_id] = measurement.value
         timestamp = (
             measurement.timestamp
@@ -117,7 +114,7 @@ class NaiveAveragePrivatizer(Privatizer):
         )
 
         # Skip old measurements
-        if datetime.now() - timestamp > MAX_MEASUREMENT_AGE:
+        if datetime.now() - timestamp > config.max_measurement_age:
             # Adding the timestamp will result in the sensors being removed as 'stale'
             self.last_measurement_timestamp[unique_sensor_id] = timestamp
             return
@@ -127,8 +124,8 @@ class NaiveAveragePrivatizer(Privatizer):
 
             if unique_sensor_id in self.update_interval:
                 self.update_interval[unique_sensor_id] = self.update_interval[unique_sensor_id] * (
-                    1 - UPDATE_INTERVAL_WEIGHT
-                ) + update_interval * (UPDATE_INTERVAL_WEIGHT)
+                    1 - config.update_interval_weight
+                ) + update_interval * (config.update_interval_weight)
             else:
                 self.update_interval[unique_sensor_id] = update_interval
 
@@ -150,6 +147,8 @@ class NaiveAveragePrivatizer(Privatizer):
         Contributions through child trixels are weight in based on the number of sensors within them.
         The trixel returns the 'unknown'(None) state if there are no contributors within the (sub-)trixel.
         """
+        config: NaiveAveragePrivatizerConfig = NaiveAveragePrivatizer.config
+
         local_sum: float | None = None
         total_local_contributor_count: int = 0
         total_child_contributor_count: int = 0
@@ -158,7 +157,7 @@ class NaiveAveragePrivatizer(Privatizer):
             if not self.sensor_in_shadow_mode(sensor):
                 # The contributing property of a sensor must not be checked, as all sensors always contribute
                 measurement_timestamp = self.last_measurement_timestamp.get(sensor, None)
-                if datetime.now() - measurement_timestamp > MAX_MEASUREMENT_AGE_AVERAGING:
+                if datetime.now() - measurement_timestamp > config.max_measurement_age_averaging:
                     continue
 
                 measurement = self.last_measurement.get(sensor, None)
@@ -198,10 +197,13 @@ class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
     last_value_child: float | None = None
     last_contributor_count_child: NonNegativeInt | None = None
 
+    config: ClassVar[NaiveSmoothingAveragePrivatizerConfig] = GlobalConfig.config.privatizer_config
+
     @override
     def filter_local_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
         """Apply exponential smoothing to local measurements."""
-        if SMOOTH_FACTOR_LOCAL == 1:
+        config: NaiveSmoothingAveragePrivatizerConfig = NaiveSmoothingAveragePrivatizer.config
+        if config.local_smooth_factor == 1:
             return value
 
         if value is None:
@@ -217,7 +219,7 @@ class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
             if contributor_count != self.last_contributor_count and self.last_contributor_count > 0:
                 self.last_value = (self.last_value / self.last_contributor_count) * contributor_count
 
-            value = self.last_value * (1 - SMOOTH_FACTOR_LOCAL) + value * SMOOTH_FACTOR_LOCAL
+            value = self.last_value * (1 - config.local_smooth_factor) + value * config.local_smooth_factor
             self.last_value = value
             self.last_contributor_count = contributor_count
             return value
@@ -225,7 +227,9 @@ class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
     @override
     def filter_child_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
         """Apply exponential smoothing to child trixel measurements."""
-        if SMOOTH_FACTOR_CHILD_TRIXEL == 1:
+        config: NaiveSmoothingAveragePrivatizerConfig = NaiveSmoothingAveragePrivatizer.config
+
+        if config.child_smooth_factor == 1:
             return value
 
         if value is None:
@@ -241,7 +245,7 @@ class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
             if contributor_count != self.last_contributor_count_child and self.last_contributor_count_child > 0:
                 self.last_value_child = (self.last_value_child / self.last_contributor_count_child) * contributor_count
 
-            value = self.last_value_child * (1 - SMOOTH_FACTOR_CHILD_TRIXEL) + value * SMOOTH_FACTOR_CHILD_TRIXEL
+            value = self.last_value_child * (1 - config.child_smooth_factor) + value * config.child_smooth_factor
             self.last_value_child = value
             self.last_contributor_count_child = contributor_count
             return value

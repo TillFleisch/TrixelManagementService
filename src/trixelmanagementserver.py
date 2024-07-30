@@ -24,14 +24,8 @@ from database import engine, get_db
 from logging_helper import get_logger
 from measurement_station.measurement_station import TAG_MEASUREMENT_STATION, TAG_TRIXELS
 from measurement_station.measurement_station import router as measurement_station_router
-from privatizer.blank_privatizer import BlankPrivatizer
-from privatizer.latest_privatizer import LatestPrivatizer
+from privatizer.common import get_privatizer
 from privatizer.manager import PrivacyManager
-from privatizer.naive_average_privatizer import (
-    NaiveAveragePrivatizer,
-    NaiveSmoothingAveragePrivatizer,
-)
-from privatizer.privatizer import Privatizer
 from schema import TrixelID
 from tls_manager import TLSManager
 
@@ -71,16 +65,11 @@ app = FastAPI(
 app.include_router(measurement_station_router)
 app.tls_manger = TLSManager()
 
-privatizer_class: type[Privatizer]
-if config.privatizer == "blank":
-    privatizer_class = BlankPrivatizer
-elif config.privatizer == "latest":
-    privatizer_class = LatestPrivatizer
-elif config.privatizer == "naive_average":
-    privatizer_class = NaiveAveragePrivatizer
-elif config.privatizer == "naive_smoothing_average":
-    privatizer_class = NaiveSmoothingAveragePrivatizer
-app.privacy_manager = PrivacyManager(tls_manager=app.tls_manger, privatizer_class=privatizer_class)
+privatizer_class = get_privatizer(config.privatizer_config.privatizer)
+logger.info(f"Using {privatizer_class.__name__} with the following configuration: {config.privatizer_config}!")
+app.privacy_manager = PrivacyManager(
+    tls_manager=app.tls_manger, privatizer_class=get_privatizer(config.privatizer_config.privatizer)
+)
 
 
 async def purge_sensor_data_job():

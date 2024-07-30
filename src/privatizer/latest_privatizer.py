@@ -5,14 +5,15 @@ from typing import Any, Callable
 from pydantic import UUID4, PositiveInt
 from typing_extensions import override
 
+from config_schema import GlobalConfig
 from logging_helper import get_logger
 from measurement_station.schema import Measurement
 from model import MeasurementTypeEnum
+from privatizer.config_schema import LatestPrivatizerConfig
 from privatizer.privatizer import Privatizer
 from privatizer.schema import SensorLifeCycleBase, UniqueSensorId
 
 logger = get_logger(__name__)
-logger.disabled = True
 
 
 class LatestPrivatizer(Privatizer):
@@ -46,6 +47,9 @@ class LatestPrivatizer(Privatizer):
             remove_sensor_method,
         )
         self._current_contributors = set()
+
+        privatizer_config: LatestPrivatizerConfig = GlobalConfig.config.privatizer_config
+        logger.disabled = not privatizer_config.logging
 
     @override
     def pre_processing(self):
