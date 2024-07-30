@@ -1,7 +1,7 @@
 """Naive average privatizer, which determines the average of all contributing sensors without further considerations."""
 
 from datetime import datetime, timedelta
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Tuple
 
 from pydantic import UUID4, NonNegativeInt
 from typing_extensions import override
@@ -203,49 +203,59 @@ class NaiveSmoothingAveragePrivatizer(NaiveAveragePrivatizer):
     def filter_local_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
         """Apply exponential smoothing to local measurements."""
         config: NaiveSmoothingAveragePrivatizerConfig = NaiveSmoothingAveragePrivatizer.config
-        if config.local_smooth_factor == 1:
-            return value
+        self.last_value, self.last_contributor_count, value = exponential_filter(
+            smooth_factor=config.local_smooth_factor,
+            value=value,
+            contributor_count=contributor_count,
+            last_value=self.last_value,
+            last_contributor_count=self.last_contributor_count,
+        )
 
-        if value is None:
-            self.last_value = None
-            self.last_contributor_count = None
-            return None
-        elif self.last_value is None:
-            self.last_value = value
-            self.last_contributor_count = contributor_count
-            return value
-        else:
-            # Compensate for sum size when the number of contributors changes
-            if contributor_count != self.last_contributor_count and self.last_contributor_count > 0:
-                self.last_value = (self.last_value / self.last_contributor_count) * contributor_count
-
-            value = self.last_value * (1 - config.local_smooth_factor) + value * config.local_smooth_factor
-            self.last_value = value
-            self.last_contributor_count = contributor_count
-            return value
+        return value
 
     @override
     def filter_child_sum(self, value: float | None, contributor_count: NonNegativeInt) -> float | None:
         """Apply exponential smoothing to child trixel measurements."""
         config: NaiveSmoothingAveragePrivatizerConfig = NaiveSmoothingAveragePrivatizer.config
+        self.last_value_child, self.last_contributor_count_child, value = exponential_filter(
+            smooth_factor=config.child_smooth_factor,
+            value=value,
+            contributor_count=contributor_count,
+            last_value=self.last_value_child,
+            last_contributor_count=self.last_contributor_count_child,
+        )
 
-        if config.child_smooth_factor == 1:
-            return value
+        return value
 
-        if value is None:
-            self.last_value_child = None
-            self.last_contributor_count_child = None
-            return None
-        elif self.last_value_child is None:
-            self.last_value_child = value
-            self.last_contributor_count_child = contributor_count
-            return value
-        else:
-            # Compensate for sum size when the number of contributors changes
-            if contributor_count != self.last_contributor_count_child and self.last_contributor_count_child > 0:
-                self.last_value_child = (self.last_value_child / self.last_contributor_count_child) * contributor_count
 
-            value = self.last_value_child * (1 - config.child_smooth_factor) + value * config.child_smooth_factor
-            self.last_value_child = value
-            self.last_contributor_count_child = contributor_count
-            return value
+def exponential_filter(
+    smooth_factor: float,
+    value: float | None,
+    last_value: float | None,
+    contributor_count: NonNegativeInt,
+    last_contributor_count: NonNegativeInt | None,
+) -> Tuple[float, NonNegativeInt, float]:
+    """
+    Apply a simple exponential filter to intermediate sum during the averaging operation.
+
+    :param smooth_factor: The filters smoothing factor
+    :param value: The new value which is added to the time series
+    :param last_value: The last (filtered) value of the time series
+    :param contributor_count: The new contributor count within trixel
+    :param last_contributor_count: The contributor count which was used during the last iteration
+    :returns: Tuple containing the updates `last_value`, `last_contributor_count`, `new_value`
+    """
+    if smooth_factor == 1:
+        return (last_value, last_contributor_count, value)
+
+    if value is None:
+        return (None, None, None)
+    elif last_value is None:
+        return (value, contributor_count, value)
+    else:
+        # Compensate for sum size when the number of contributors changes
+        if contributor_count != last_contributor_count and last_contributor_count > 0:
+            last_value = (last_value / last_contributor_count) * contributor_count
+
+        value = last_value * (1 - smooth_factor) + value * smooth_factor
+        return (value, contributor_count, value)
