@@ -52,17 +52,17 @@ class LatestPrivatizer(Privatizer):
         logger.disabled = not privatizer_config.logging
 
     @override
-    def pre_processing(self):
+    async def pre_processing(self):
         """Delete stale sensors, where stale means, the sensor missed a single update."""
         missing_contributors = self._sensors.difference(self._current_contributors)
 
         for sensor in missing_contributors:
             logger.warning(f"Deleting stale sensor: {sensor}")
-            self.manager_remove_sensor(sensor)
+            await self.manager_remove_sensor(sensor)
         self._current_contributors = set()
 
     @override
-    def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> None:
+    async def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> None:
         """Perform sensor evaluation, accept every sensor."""
         logger.debug(f"{self._id}&{self._measurement_type}: Evaluating sensor quality ({unique_sensor_id})")
 
@@ -71,7 +71,7 @@ class LatestPrivatizer(Privatizer):
         return sensor_life_cycle.contributing
 
     @override
-    def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
+    async def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
         """Process incoming sensor updates."""
         logger.debug(f"{self._id}&{self._measurement_type}: Processing update for ({unique_sensor_id})")
 
@@ -81,7 +81,7 @@ class LatestPrivatizer(Privatizer):
         self._current_contributors.add(unique_sensor_id)
 
     @override
-    def get_value(self) -> float | None:
+    async def get_value(self) -> float | None:
         """Generate trixel output value."""
         logger.debug(
             f"""{self._id}&{self._measurement_type}: Getting value for trixel ({self._id}, {self._measurement_type}) \

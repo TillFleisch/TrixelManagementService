@@ -339,7 +339,7 @@ async def store_and_process_updates(
         # TODO: add purge job for old data - keep statistics
 
         # Submit to privatizers for contribution in trixels
-        adjust_trixel_map = privacy_manager.batch_contribute(
+        adjust_trixel_map = await privacy_manager.batch_contribute(
             ms_uuid=ms_uuid,
             updates=updates,
             measurement_type_reference=measurement_type_reference,

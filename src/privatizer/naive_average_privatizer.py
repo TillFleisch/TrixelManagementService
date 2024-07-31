@@ -61,14 +61,14 @@ class NaiveAveragePrivatizer(Privatizer):
         logger.disabled = not NaiveAveragePrivatizer.config.logging
 
     @override
-    def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> bool:
+    async def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> bool:
         """Accept every sensor as a contributor."""
         sensor_life_cycle: SensorLifeCycleBase = self.get_lifecycle(unique_sensor_id=unique_sensor_id)
         sensor_life_cycle.contributing = True
         return sensor_life_cycle.contributing
 
     @override
-    def pre_processing(self):
+    async def pre_processing(self):
         """Detect and remove stale sensors."""
         config: NaiveAveragePrivatizerConfig = NaiveAveragePrivatizer.config
         sensors_to_remove: set[UniqueSensorId] = set()
@@ -88,11 +88,11 @@ class NaiveAveragePrivatizer(Privatizer):
 
         for sensor in sensors_to_remove:
             logger.debug(f"Removing stale sensor {sensor} from privatizer ({self._id},{self._measurement_type})")
-            self.manager_remove_sensor(sensor)
+            await self.manager_remove_sensor(sensor)
 
-    def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
+    async def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
         """Remove sensor related details, if a sensor is removed from this privatizer."""
-        super().remove_sensor(unique_sensor_id)
+        await super().remove_sensor(unique_sensor_id)
 
         if unique_sensor_id in self.last_measurement:
             del self.last_measurement[unique_sensor_id]
@@ -102,7 +102,7 @@ class NaiveAveragePrivatizer(Privatizer):
             del self.update_interval[unique_sensor_id]
 
     @override
-    def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
+    async def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
         """Store and update measurement related information (update interval, time of measurement)."""
         config: NaiveAveragePrivatizerConfig = NaiveAveragePrivatizer.config
 
@@ -140,7 +140,7 @@ class NaiveAveragePrivatizer(Privatizer):
         return value
 
     @override
-    def get_value(self) -> float | None:
+    async def get_value(self) -> float | None:
         """
         Determine the average output value based on local and child contributors.
 

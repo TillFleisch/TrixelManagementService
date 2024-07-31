@@ -1,6 +1,6 @@
 """Privatizer, which takes measurements of a measurement type within a trixel and determines an output value."""
 
-from typing import Any, Callable, ClassVar
+from typing import Any, Callable, ClassVar, Coroutine
 
 from pydantic import UUID4, NonNegativeInt, PositiveInt
 from pynyhtm import HTM
@@ -52,7 +52,7 @@ class Privatizer:
     __get_privatizer_method: ClassVar[Callable[[TrixelID, MeasurementTypeEnum, bool], Self]]
     __get_lifecycle_method: ClassVar[Callable[[UniqueSensorId, bool, SensorLifeCycleBase | None], Self]]
     __get_k_requirement_method: ClassVar[Callable[[UniqueSensorId | UUID4], PositiveInt]]
-    __remove_sensor: ClassVar[Callable[[UniqueSensorId], None]]
+    __remove_sensor: ClassVar[Callable[[UniqueSensorId], Coroutine[Any, Any, None]]]
 
     _id: TrixelID
     _measurement_type: MeasurementTypeEnum
@@ -125,7 +125,7 @@ class Privatizer:
         get_privatizer_method: Callable[[TrixelID, MeasurementTypeEnum, bool], Any],
         get_lifecycle_method: Callable[[UniqueSensorId, bool, SensorLifeCycleBase | None], Any],
         get_k_requirement_method: Callable[[UniqueSensorId | UUID4], PositiveInt],
-        remove_sensor_method: Callable[[UniqueSensorId], None],
+        remove_sensor_method: Callable[[UniqueSensorId], Coroutine[Any, Any, None]],
     ):
         """
         Initialize this privatizer to work for the given trixel&type.
@@ -202,13 +202,13 @@ class Privatizer:
 
     @final
     @classmethod
-    def manager_remove_sensor(cls, unique_sensor_id: UniqueSensorId) -> None:
+    async def manager_remove_sensor(cls, unique_sensor_id: UniqueSensorId) -> None:
         """
         Wrap the `remove_sensor` method of the manager in charge of this privatizer.
 
         :param unique_sensor_id: The sensor which should be removed from the manager
         """
-        cls.__remove_sensor(unique_sensor_id)
+        await cls.__remove_sensor(unique_sensor_id)
 
     @final
     def set_tls_ms_count(self, value: NonNegativeInt) -> None:
@@ -260,7 +260,7 @@ class Privatizer:
 
         return self.__contributing_sensor_count + sub_trixel_count
 
-    def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
+    async def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
         """
         Remove a sensor for this privatizer.
 
@@ -277,7 +277,7 @@ class Privatizer:
         if unique_sensor_id in self._shadow_map:
             del self._shadow_map[unique_sensor_id]
 
-    def add_sensor(self, unique_sensor_id: UniqueSensorId, should_evaluate: bool) -> None:
+    async def add_sensor(self, unique_sensor_id: UniqueSensorId, should_evaluate: bool) -> None:
         """
         Add a sensor to this privatizer.
 
@@ -295,7 +295,7 @@ class Privatizer:
             self._shadow_map[unique_sensor_id] = True
         self.__evaluation_map[unique_sensor_id] = should_evaluate
 
-    def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
+    async def new_value(self, unique_sensor_id: UniqueSensorId, measurement: Measurement) -> None:
         """
         Process incoming sensor values every time a new sensor value is published to this privatizer.
 
@@ -309,7 +309,7 @@ class Privatizer:
         """
         pass
 
-    def get_value(self) -> float | None:
+    async def get_value(self) -> float | None:
         """
         Retrieve the current value for the trixel&type managed by this privatizer.
 
@@ -325,7 +325,7 @@ class Privatizer:
         """
         raise NotImplementedError()
 
-    def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> bool:
+    async def evaluate_sensor_quality(self, unique_sensor_id: UniqueSensorId) -> bool:
         """
         Determine the quality of a sensor and other properties.
 
@@ -336,7 +336,7 @@ class Privatizer:
         """
         raise NotImplementedError()
 
-    def pre_processing(self):
+    async def pre_processing(self):
         """
         Pre-processing method which is invoked before sensor evaluation and `get_value`.
 
@@ -345,7 +345,7 @@ class Privatizer:
         """
         pass
 
-    def post_processing(self):
+    async def post_processing(self):
         """
         Post-processing which is invoked after all sensors have been evaluated and once `get_value` has been called.
 
@@ -393,14 +393,14 @@ class Privatizer:
         :return: Updated information about the output state of this trixel and weather the TLS state should be updated
         """
         # TODO: consider implementing/requiring asynchronous sensor evaluation
-        self.pre_processing()
+        await self.pre_processing()
 
         # Evaluate the quality of all sensors within this trixel
         contributing_sensor_set: set[UniqueSensorId] = set()
         for sensor in self._sensors:
             if self.__evaluation_map[sensor]:
                 # Perform evaluation if required
-                if self.evaluate_sensor_quality(sensor):
+                if await self.evaluate_sensor_quality(sensor):
                     contributing_sensor_set.add(sensor)
             else:
                 # Get contribution state from lifecycle object which is updates by a different (parent) privatizer
@@ -441,7 +441,7 @@ class Privatizer:
                 self._shadow_map[sensor] = False
 
                 if self._parent_privatizer is not None:
-                    self._parent_privatizer.remove_sensor(sensor)
+                    await self._parent_privatizer.remove_sensor(sensor)
             else:
                 self._shadow_map[sensor] = True
 
@@ -466,7 +466,7 @@ class Privatizer:
         if new_measurement_station_count != self.__tls_ms_count:
             update_tls = True
 
-        new_value = self.get_value()
+        new_value = await self.get_value()
 
         changed: bool = False
         if self.__last_update is not None and (
@@ -484,5 +484,5 @@ class Privatizer:
         )
         self.__last_update = update
 
-        self.post_processing()
+        await self.post_processing()
         return (update, update_tls)

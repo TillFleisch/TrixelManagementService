@@ -142,7 +142,7 @@ class PrivacyManager:
         else:
             self._k_map[id_] = k_requirement
 
-    def remove_sensor(self, unique_sensor_id: UniqueSensorId):
+    async def remove_sensor(self, unique_sensor_id: UniqueSensorId):
         """
         Remove a sensor from all privatizers in which they contribute.
 
@@ -154,12 +154,12 @@ class PrivacyManager:
         """
         if unique_sensor_id in self._sensor_map:
             existing_privatizer = self._sensor_map[unique_sensor_id]
-            existing_privatizer.remove_sensor(unique_sensor_id)
+            await existing_privatizer.remove_sensor(unique_sensor_id)
             if existing_parent_privatizer := existing_privatizer._parent_privatizer:
-                existing_parent_privatizer.remove_sensor(unique_sensor_id)
+                await existing_parent_privatizer.remove_sensor(unique_sensor_id)
             del self._sensor_map[unique_sensor_id]
 
-    def contribute(
+    async def contribute(
         self,
         sub_trixel_id: TrixelID,
         unique_sensor_id: UniqueSensorId,
@@ -234,7 +234,7 @@ class PrivacyManager:
             existing_privatizer = self._sensor_map[unique_sensor_id]
 
             if existing_privatizer._id != sub_trixel_id:
-                self.remove_sensor(unique_sensor_id)
+                await self.remove_sensor(unique_sensor_id)
         else:
             first_contribution = True
         self._sensor_map[unique_sensor_id] = child_privatizer
@@ -257,19 +257,19 @@ class PrivacyManager:
             # Submit measurement to child privatizer (usually a shadow contribution, except when the sensor has not
             # re-negotiated a new trixel-id, in that case the contribution is "proxied" to the child)
             should_evaluate = not shadow_contributing_to_child or is_only_shadow_contributing
-            child_privatizer.add_sensor(unique_sensor_id=unique_sensor_id, should_evaluate=should_evaluate)
-            child_privatizer.new_value(unique_sensor_id=unique_sensor_id, measurement=measurement)
+            await child_privatizer.add_sensor(unique_sensor_id=unique_sensor_id, should_evaluate=should_evaluate)
+            await child_privatizer.new_value(unique_sensor_id=unique_sensor_id, measurement=measurement)
         else:
-            child_privatizer.remove_sensor(unique_sensor_id=unique_sensor_id)
+            await child_privatizer.remove_sensor(unique_sensor_id=unique_sensor_id)
 
         if contribute_to_parent or shadow_contributing_to_parent:
             # Submit measurement to parent privatizer (default case, or when no trixel exists which can satisfy k
             # (shadow-contribution))
             should_evaluate = not shadow_contributing_to_parent or is_only_shadow_contributing
-            parent_privatizer.add_sensor(unique_sensor_id=unique_sensor_id, should_evaluate=should_evaluate)
-            parent_privatizer.new_value(unique_sensor_id=unique_sensor_id, measurement=measurement)
+            await parent_privatizer.add_sensor(unique_sensor_id=unique_sensor_id, should_evaluate=should_evaluate)
+            await parent_privatizer.new_value(unique_sensor_id=unique_sensor_id, measurement=measurement)
         else:
-            parent_privatizer.remove_sensor(unique_sensor_id=unique_sensor_id)
+            await parent_privatizer.remove_sensor(unique_sensor_id=unique_sensor_id)
 
         # Recommend a trixel-change if the sensor is contributing to the child or the parent cannot satisfy the
         # k-requirement
@@ -283,7 +283,7 @@ class PrivacyManager:
 
         return change_direction
 
-    def batch_contribute(
+    async def batch_contribute(
         self,
         ms_uuid: UUID4,
         updates: BatchUpdate,
@@ -305,7 +305,7 @@ class PrivacyManager:
             for measurement in measurements:
                 unique_sensor_id = UniqueSensorId(ms_uuid=ms_uuid, sensor_id=measurement.sensor_id)
                 self._k_map[ms_uuid] = k_requirement
-                direction = self.contribute(
+                direction = await self.contribute(
                     sub_trixel_id=trixel_id,
                     unique_sensor_id=unique_sensor_id,
                     measurement=measurement,
