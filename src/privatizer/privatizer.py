@@ -6,13 +6,13 @@ from pydantic import UUID4, NonNegativeInt, PositiveInt
 from pynyhtm import HTM
 from typing_extensions import Self, final
 
+from config_schema import GlobalConfig
 from logging_helper import get_logger
 from measurement_station.schema import Measurement
 from model import MeasurementTypeEnum
 from privatizer.schema import SensorLifeCycleBase, TrixelUpdate, UniqueSensorId
 from schema import TrixelID
 
-MAX_LEVEL = 20
 logger = get_logger(__name__)
 
 
@@ -144,7 +144,7 @@ class Privatizer:
         self._id = trixel_id
         self._measurement_type = measurement_type
         self._level = HTM.get_level(trixel_id)
-        self._children = set(HTM.children(trixel_id)) if self._level < MAX_LEVEL else None
+        self._children = set(HTM.children(trixel_id)) if self._level < GlobalConfig.config.max_level else None
         self._neighbors = set(HTM.neighbors(trixel_id))
         self._parent = HTM.parent(trixel_id) if self._level > 0 else None
         self._parent_privatizer = (

@@ -19,8 +19,6 @@ from schema import TrixelID
 from tls_manager import TLSManager
 
 logger = get_logger(__name__)
-MAX_LEVEL = 20
-UPDATE_FREQUENCY = GlobalConfig.config.trixel_update_frequency
 
 
 class PrivacyManager:
@@ -218,8 +216,8 @@ class PrivacyManager:
         target_level = HTM.get_level(sub_trixel_id)
         if target_level == 0:
             raise ValueError("TMS does not accept contribution to the root level")
-        elif target_level >= MAX_LEVEL:
-            raise ValueError(f"TMS does not accept contributions above level {MAX_LEVEL}")
+        elif target_level > GlobalConfig.config.max_level:
+            raise ValueError(f"TMS does not accept contributions above level {GlobalConfig.config.max_level}")
 
         child_privatizer: Privatizer = self.get_privatizer(
             trixel_id=sub_trixel_id, measurement_type=measurement_type, instantiate=True
@@ -444,7 +442,7 @@ class PrivacyManager:
                 logger.debug("Performing periodic evaluation for trixels!")
 
                 task = asyncio.create_task(self.process())
-                await asyncio.sleep(UPDATE_FREQUENCY)
+                await asyncio.sleep(GlobalConfig.config.trixel_update_frequency)
                 while not task.done():
                     logger.warning("Processing of trixels did not finish in time, skipping periodic evaluation!")
-                    await asyncio.sleep(UPDATE_FREQUENCY)
+                    await asyncio.sleep(GlobalConfig.config.trixel_update_frequency)
