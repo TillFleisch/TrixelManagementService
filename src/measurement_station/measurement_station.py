@@ -16,6 +16,7 @@ from config_schema import Config, GlobalConfig
 from database import get_db
 from model import MeasurementTypeEnum
 from privatizer.manager import PrivacyManager
+from privatizer.schema import UniqueSensorId
 
 from . import crud, schema
 
@@ -131,12 +132,17 @@ async def put_measurement_station(
     status_code=HTTPStatus.NO_CONTENT,
 )
 async def delete_measurement_station(
+    request: Request,
     ms_uuid: UUID4 = Depends(verify_ms_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete an existing measurement station from the DB."""
     try:
+        sensors = await crud.get_sensors(db, ms_uuid=ms_uuid)
         if await crud.delete_measurement_station(db, ms_uuid):
+            for sensor in sensors:
+                manager: PrivacyManager = request.app.privacy_manager
+                await manager.remove_sensor(unique_sensor_id=UniqueSensorId(ms_uuid=ms_uuid, sensor_id=sensor.id))
             return
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Measurement station does not exist!")
@@ -255,6 +261,7 @@ async def get_sensors(
     status_code=HTTPStatus.NO_CONTENT,
 )
 async def delete_sensor(
+    request: Request,
     sensor_id: Annotated[NonNegativeInt, Path(description="ID of the sensor which should be removed.")],
     ms_uuid: UUID4 = Depends(verify_ms_token),
     db: AsyncSession = Depends(get_db),
@@ -262,6 +269,8 @@ async def delete_sensor(
     """Delete a sensor form a measurement station."""
     try:
         if await crud.delete_sensor(db, ms_uuid=ms_uuid, sensor_id=sensor_id):
+            manager: PrivacyManager = request.app.privacy_manager
+            await manager.remove_sensor(unique_sensor_id=UniqueSensorId(ms_uuid=ms_uuid, sensor_id=sensor_id))
             return
     except ValueError:
         raise HTTPException(HTTPStatus.NOT_FOUND, "Sensor with the given ID does not exist!")
