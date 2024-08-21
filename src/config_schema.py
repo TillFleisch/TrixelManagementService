@@ -12,6 +12,7 @@ from pydantic import (
     Field,
     GetCoreSchemaHandler,
     NonNegativeInt,
+    PositiveInt,
     SecretStr,
     model_validator,
 )
@@ -107,6 +108,7 @@ class Config(BaseSettings):
     tms_config: TMSConfig
     model_config = SettingsConfigDict(toml_file="config/config.toml")
     trixel_update_frequency: NonNegativeInt = 60
+    max_level: PositiveInt = Field(24, ge=1, le=24)
     privatizer_config: AvailablePrivatizerConfigs
     sensor_data_purge_interval: timedelta = timedelta(hours=1)
     sensor_data_keep_interval: timedelta = timedelta(weeks=2)

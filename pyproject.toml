@@ -22,6 +22,7 @@ keywords = ["trixel", "private", "privacy focused","environmental monitoring", "
 dependencies = [
     'tomli; python_version < "3.11"',
     'fastapi',
+    'uvicorn',
     'packaging',
     'pydantic-settings',
     'toml',
