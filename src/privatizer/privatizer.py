@@ -49,8 +49,8 @@ class Privatizer:
     `manager_remove_sensor` method.
     """
 
-    __get_privatizer_method: ClassVar[Callable[[TrixelID, MeasurementTypeEnum, bool], Self]]
-    __get_lifecycle_method: ClassVar[Callable[[UniqueSensorId, bool, SensorLifeCycleBase | None], Self]]
+    __get_privatizer_method: ClassVar[Callable[[TrixelID, MeasurementTypeEnum, bool], Self | None]]
+    __get_lifecycle_method: ClassVar[Callable[[UniqueSensorId, bool, SensorLifeCycleBase | None], Self | None]]
     __get_k_requirement_method: ClassVar[Callable[[UniqueSensorId | UUID4], PositiveInt]]
     __remove_sensor: ClassVar[Callable[[UniqueSensorId], Coroutine[Any, Any, None]]]
 
@@ -158,7 +158,7 @@ class Privatizer:
     @final
     def get_privatizer(
         self, trixel_id: TrixelID, measurement_type: MeasurementTypeEnum | None = None, instantiate: bool = False
-    ) -> Self:
+    ) -> Self | None:
         """
         Wrap the `get_privatizer` method of the manager in charge of this privatizer.
 
@@ -178,7 +178,7 @@ class Privatizer:
     @classmethod
     def get_lifecycle(
         cls, unique_sensor_id: UniqueSensorId, instantiate: bool = True, lifecycle: SensorLifeCycleBase | None = None
-    ) -> SensorLifeCycleBase:
+    ) -> SensorLifeCycleBase | None:
         """
         Wrap the `get_lifecycle` method of the manager in charge of this privatizer.
 

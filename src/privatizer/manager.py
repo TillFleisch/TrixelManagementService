@@ -76,7 +76,7 @@ class PrivacyManager:
 
     def get_privatizer(
         self, trixel_id: TrixelID, measurement_type: MeasurementTypeEnum, instantiate: bool = False
-    ) -> Privatizer:
+    ) -> Privatizer | None:
         """
         Get the privatizer responsible for a single trixel&type.
 
@@ -103,7 +103,7 @@ class PrivacyManager:
 
     def get_lifecycle(
         self, unique_sensor_id: UniqueSensorId, instantiate: bool = True, lifecycle: SensorLifeCycleBase | None = None
-    ) -> SensorLifeCycleBase:
+    ) -> SensorLifeCycleBase | None:
         """
         Get the lifecycle object for a unique sensor.
 
