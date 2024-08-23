@@ -354,6 +354,17 @@ class Privatizer:
         """
         pass
 
+    async def can_subdivide(self) -> bool:
+        """
+        Determine if this privatizer is allowed to subdivide further.
+
+        Some privatizer implementation may use this to prevent sub-division in case a privatizers output or other
+        properties are required (to determine sensor quality), which are only determined after some time.
+
+        :returns: True if the privatizer is allowed to subdivide, False otherwise
+        """
+        return True
+
     def sensor_in_shadow_mode(self, unique_sensor_id: UniqueSensorId):
         """
         Get the shadow mode state of a sensor within this privatizer.
@@ -392,19 +403,19 @@ class Privatizer:
 
         :return: Updated information about the output state of this trixel and weather the TLS state should be updated
         """
-        # TODO: consider implementing/requiring asynchronous sensor evaluation
         await self.pre_processing()
 
         # Evaluate the quality of all sensors within this trixel
         contributing_sensor_set: set[UniqueSensorId] = set()
-        for sensor in self._sensors:
+        for sensor in frozenset(self._sensors):
             if self.__evaluation_map[sensor]:
                 # Perform evaluation if required
                 if await self.evaluate_sensor_quality(sensor):
                     contributing_sensor_set.add(sensor)
             else:
-                # Get contribution state from lifecycle object which is updates by a different (parent) privatizer
-                if self.get_lifecycle(sensor).contributing:
+                # Get contribution state from lifecycle object which is updated by a different (parent) privatizer
+                lifecycle: SensorLifeCycleBase | None = self.get_lifecycle(sensor, instantiate=False)
+                if lifecycle is not None and lifecycle.contributing:
                     contributing_sensor_set.add(sensor)
 
         # Determine how many sensor (including shadow sensors) can contribute to this trixel
@@ -414,36 +425,37 @@ class Privatizer:
 
         child_ms_count = self.get_total_contributing_ms_count() - self.__contributing_ms_count
 
-        # Map k-requirements and how many contributors there are to each k-level
-        shadow_k_satisfiers: dict[int, int] = dict()
-        for ms_uuid in shadow_contributing_ms:
-            k = self.get_k_requirement(ms_uuid)
-            shadow_k_satisfiers.setdefault(k, 0)
-            shadow_k_satisfiers[k] += 1
+        if await self.can_subdivide():
+            # Map k-requirements and how many contributors there are to each k-level
+            shadow_k_satisfiers: dict[int, int] = dict()
+            for ms_uuid in shadow_contributing_ms:
+                k = self.get_k_requirement(ms_uuid)
+                shadow_k_satisfiers.setdefault(k, 0)
+                shadow_k_satisfiers[k] += 1
 
-        # add k-over-satisfiers to lower k-levels (a sensor which requires k=2 also counts towards a k=3 requirement)
-        for k in shadow_k_satisfiers.keys():
-            for other_k in shadow_k_satisfiers.keys():
-                if k > other_k:
-                    shadow_k_satisfiers[k] += shadow_k_satisfiers[other_k]
+            # add k-over-satisfiers to lower k-levels (sensor which requires k=2 also counts towards a k=3 requirement)
+            for k in shadow_k_satisfiers.keys():
+                for other_k in shadow_k_satisfiers.keys():
+                    if k > other_k:
+                        shadow_k_satisfiers[k] += shadow_k_satisfiers[other_k]
 
-        # Determine highest k which can be achieved when using shadow contributions
-        shadow_max_k = 0
-        for k, satisfier_count in shadow_k_satisfiers.items():
-            # Child contributions counts are included as those must already be k-satisfied
-            if (satisfier_count + child_ms_count) >= k and k >= shadow_max_k:
-                shadow_max_k = k
+            # Determine highest k which can be achieved when using shadow contributions
+            shadow_max_k = 0
+            for k, satisfier_count in shadow_k_satisfiers.items():
+                # Child contributions counts are included as those must already be k-satisfied
+                if (satisfier_count + child_ms_count) >= k and k >= shadow_max_k:
+                    shadow_max_k = k
 
-        # Unlock sensors from shadow contributing if their k-requirement can be satisfied
-        for sensor in self._sensors:
-            k = self.get_k_requirement(sensor)
-            if k <= shadow_max_k:
-                self._shadow_map[sensor] = False
+            # Unlock sensors from shadow contributing if their k-requirement can be satisfied
+            for sensor in frozenset(self._sensors):
+                k = self.get_k_requirement(sensor)
+                if k <= shadow_max_k:
+                    self._shadow_map[sensor] = False
 
-                if self._parent_privatizer is not None:
-                    await self._parent_privatizer.remove_sensor(sensor)
-            else:
-                self._shadow_map[sensor] = True
+                    if self._parent_privatizer is not None:
+                        await self._parent_privatizer.remove_sensor(sensor)
+                else:
+                    self._shadow_map[sensor] = True
 
         contributing_ms: set[UUID4] = set()
         contributing_sensor_count = 0

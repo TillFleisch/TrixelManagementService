@@ -376,7 +376,7 @@ class PrivacyManager:
                     if update_tls:
                         tls_updates[privatizer] = trixel_update.measurement_station_count
 
-                    if trixel_update.changed:
+                    if trixel_update.value is not None or trixel_update.changed:
                         trixel_updates[trixel_id] = trixel_update
 
                     if privatizer.stale:

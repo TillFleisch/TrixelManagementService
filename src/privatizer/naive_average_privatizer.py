@@ -153,11 +153,19 @@ class NaiveAveragePrivatizer(Privatizer):
         total_local_contributor_count: int = 0
         total_child_contributor_count: int = 0
 
+        sensor: UniqueSensorId
         for sensor in self.sensors:
             if not self.sensor_in_shadow_mode(sensor):
-                # The contributing property of a sensor must not be checked, as all sensors always contribute
                 measurement_timestamp = self.last_measurement_timestamp.get(sensor, None)
                 if datetime.now() - measurement_timestamp > config.max_measurement_age_averaging:
+                    continue
+
+                # Non-contributing sensors are filtered out, in case some derived class implements sensor evaluation
+                # For the naive average privatizer all by itself, this step is not strictly necessary
+                sensor_life_cycle: SensorLifeCycleBase | None = self.get_lifecycle(
+                    unique_sensor_id=sensor, instantiate=False
+                )
+                if sensor_life_cycle is None or not sensor_life_cycle.contributing:
                     continue
 
                 measurement = self.last_measurement.get(sensor, None)
