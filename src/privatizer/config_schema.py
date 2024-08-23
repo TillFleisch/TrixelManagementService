@@ -185,6 +185,15 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # a time frame of 1 hour will be invalidated every 15 minutes
     cache_invalidation_factor: PositiveInt = 4
 
+    # The smoothing factor which is used during sensor impact noise removal for a sensors exponential moving average
+    sensor_ema_smoothing_factor: PositiveFloat = Field(0.2, ge=0.0, le=1.0)
+
+    # The threshold which must be exceeded (in comparison to ema) by in order for a measurement to be discarded
+    sensor_impact_noise_threshold: dict[MeasurementTypeEnum, PositiveFloat] = {
+        MeasurementTypeEnum.AMBIENT_TEMPERATURE: 20,
+        MeasurementTypeEnum.RELATIVE_HUMIDITY: 20,
+    }
+
 
 class AveragePrivatizerConfig(CorrelationEvaluatingPrivatizerConfig, NaiveAveragePrivatizerConfig):
     """Additional configuration variables required by the (non-naive) average privatizer."""

@@ -56,6 +56,8 @@ class SensorLifeCycleDetailed(SensorLifeCycleBase):
 
     trixel_correlation_score: float | None = None
 
+    exponential_moving_average: float | None = None
+
 
 class CorrelationEvaluatingPrivatizer(Privatizer):
     """
@@ -232,11 +234,30 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         Apply additional filters to a sensors input measurement.
 
         This privatizer implementation filters out outliers based on a sensors recent performance.
+
+        Impulse noise (single spikes) are filtered out using a simple threshold operation in comparison to the sensor
+        exponential moving average.
         """
         # The lifecycle object MUST be retrieved so that the correct class is used which can hold additional information
-        self.get_lifecycle(unique_sensor_id=unique_sensor_id, lifecycle=SensorLifeCycleDetailed())
+        sensor_life_cycle: SensorLifeCycleDetailed = self.get_lifecycle(
+            unique_sensor_id=unique_sensor_id, lifecycle=SensorLifeCycleDetailed()
+        )
 
-        # TODO: apply (outlier) filtering to measurements
+        outlier: bool = False
+        if sensor_life_cycle.exponential_moving_average is None or measurement.value is None:
+            sensor_life_cycle.exponential_moving_average = measurement.value
+        else:
+            threshold = CorrelationEvaluatingPrivatizer.config.sensor_impact_noise_threshold[self.measurement_type]
+            smooth_factor = CorrelationEvaluatingPrivatizer.config.sensor_ema_smoothing_factor
+
+            if abs(measurement.value - sensor_life_cycle.exponential_moving_average) > threshold:
+                outlier = True
+
+            sensor_life_cycle.exponential_moving_average = (
+                sensor_life_cycle.exponential_moving_average * (1 - smooth_factor) + smooth_factor * measurement.value
+            )
+        if outlier:
+            measurement.value = None
 
         await super().new_value(unique_sensor_id, measurement)
 

@@ -157,7 +157,10 @@ class NaiveAveragePrivatizer(Privatizer):
         for sensor in self.sensors:
             if not self.sensor_in_shadow_mode(sensor):
                 measurement_timestamp = self.last_measurement_timestamp.get(sensor, None)
-                if datetime.now() - measurement_timestamp > config.max_measurement_age_averaging:
+                if (
+                    measurement_timestamp is None
+                    or datetime.now() - measurement_timestamp > config.max_measurement_age_averaging
+                ):
                     continue
 
                 # Non-contributing sensors are filtered out, in case some derived class implements sensor evaluation
