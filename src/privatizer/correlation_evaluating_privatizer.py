@@ -52,6 +52,10 @@ class SensorLifeCycleDetailed(SensorLifeCycleBase):
     # Timestamp at which sensors were last evaluated
     sensor_median_last_update: dict[PositiveInt, datetime] | None = None
 
+    local_correlation_score: float | None = None
+
+    trixel_correlation_score: float | None = None
+
 
 class CorrelationEvaluatingPrivatizer(Privatizer):
     """
@@ -331,8 +335,25 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         :param sensor_life_cycle: the sensors lifecycle object
         :returns: correlation score between 0..1
         """
-        # TODO: cache result with cache-invalidation based on get_cached... methods
         config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
+
+        # Check if cached which are used in the following have become invalid
+        valid_cache: bool = True
+        time_range: timedelta
+        for time_range in config.root_level_median_correlation_settings.keys():
+            if (
+                datetime.now() - self.local_sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
+                or sensor_life_cycle.sensor_median_last_update is None
+                or datetime.now()
+                - sensor_life_cycle.sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
+            ):
+                valid_cache = False
+                break
+        if valid_cache:
+            return sensor_life_cycle.local_correlation_score
+
         async for db in get_db():
 
             sub_scores: list[float] = list()
@@ -345,6 +366,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                 )
 
                 if sensor_median is None or local_sensor_median is None:
+                    sensor_life_cycle.local_correlation_score = 0.0
                     return 0.0
 
                 delta = abs(local_sensor_median - sensor_median)
@@ -353,10 +375,13 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                 if delta <= max_delta:
                     sub_scores.append(1 - (delta / max_delta))
                 else:
+                    sensor_life_cycle.local_correlation_score = 0.0
                     return 0.0
 
-            return min(sub_scores)
+            sensor_life_cycle.local_correlation_score = min(sub_scores)
+            return sensor_life_cycle.local_correlation_score
 
+        sensor_life_cycle.local_correlation_score = 0.0
         return 0.0
 
     async def trixel_correlation_score(
@@ -369,8 +394,44 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         :param sensor_life_cycle: the sensors lifecycle object
         :returns: correlation score between 0..1
         """
-        # TODO: cache result with cache-invalidation based on get_cached... methods
         config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
+
+        # Check if cached which are used in the following have become invalid
+        valid_cache: bool = True
+        time_range: timedelta
+        for time_range in config.trixel_median_correlation_settings.keys():
+            if (
+                sensor_life_cycle.sensor_median_last_update is None
+                or datetime.now()
+                - sensor_life_cycle.sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
+            ):
+                valid_cache = False
+                break
+            privatizer: CorrelationEvaluatingPrivatizer | None = self
+            for i in range(0, config.trixel_median_check_generations + 2):
+                if privatizer._parent is None:
+                    break
+
+                privatizer = self.get_privatizer(trixel_id=privatizer._parent, measurement_type=self.measurement_type)
+                if privatizer is None:
+                    break
+                if i == 0:
+                    continue
+
+                if (
+                    datetime.now()
+                    - privatizer.trixel_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                    > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
+                ):
+                    valid_cache = False
+                    break
+            if not valid_cache:
+                break
+
+        if valid_cache:
+            return sensor_life_cycle.trixel_correlation_score
+
         async for db in get_db():
 
             sub_scores: list[float] = list()
@@ -382,6 +443,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                 )
 
                 if sensor_median is None:
+                    sensor_life_cycle.trixel_correlation_score = 0.0
                     return 0.0
 
                 privatizer: CorrelationEvaluatingPrivatizer | None = self
@@ -405,6 +467,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                     trixel_median: float | None = await privatizer.get_cached_trixel_median(db, time_range)
 
                     if trixel_median is None:
+                        sensor_life_cycle.trixel_correlation_score = 0.0
                         return 0.0
 
                     delta = abs(trixel_median - sensor_median)
@@ -423,14 +486,18 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                     if delta <= max_delta:
                         sub_scores.append(1 - (delta / max_delta))
                     else:
+                        sensor_life_cycle.trixel_correlation_score = 0.0
                         return 0.0
 
             # Cannot determine score, ancestor unavailable
             if len(sub_scores) == 0:
+                sensor_life_cycle.trixel_correlation_score = 0.0
                 return 0.0
 
-            return min(sub_scores)
+            sensor_life_cycle.trixel_correlation_score = min(sub_scores)
+            return sensor_life_cycle.trixel_correlation_score
 
+        sensor_life_cycle.trixel_correlation_score = 0.0
         return 0.0
 
     async def get_cached_sensor_median(
