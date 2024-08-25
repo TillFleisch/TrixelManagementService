@@ -5,6 +5,7 @@ from typing import ClassVar
 from config_schema import GlobalConfig
 from privatizer.config_schema import (
     AveragePrivatizerConfig,
+    KalmanPrivatizerConfig,
     SmoothingAveragePrivatizerConfig,
 )
 from privatizer.correlation_evaluating_privatizer import CorrelationEvaluatingPrivatizer
@@ -12,6 +13,7 @@ from privatizer.naive_average_privatizer import (
     NaiveAveragePrivatizer,
     NaiveSmoothingAveragePrivatizer,
 )
+from privatizer.naive_kalman_privatizer import NaiveKalmanPrivatizer
 
 
 class AveragePrivatizer(CorrelationEvaluatingPrivatizer, NaiveAveragePrivatizer):
@@ -31,3 +33,16 @@ class SmoothingAveragePrivatizer(CorrelationEvaluatingPrivatizer, NaiveSmoothing
     """Like AP, additionally applies exponential smoothing separately to local and subtrixel measurements."""
 
     config: ClassVar[SmoothingAveragePrivatizerConfig] = GlobalConfig.config.privatizer_config
+
+
+class KalmanPrivatizer(CorrelationEvaluatingPrivatizer, NaiveKalmanPrivatizer):
+    """
+    The Kalman privatizer extends on the native Kalman privatizer approach by implementing proper sensor evaluation.
+
+    This privatizer generates higher quality results, since it does not include "bad" sensors.
+    A sensor is only included when it is deemed 'reliable' and 'trustworthy'.
+    The criteria which must be met by a sensors depend on the `CorrelationEvaluatingPrivatizer`.
+    Furthermore, due to the use of the `CorrelationEvaluatingPrivatizer`, incoming sensor data is lightly filtered.
+    """
+
+    config: ClassVar[KalmanPrivatizerConfig] = GlobalConfig.config.privatizer_config

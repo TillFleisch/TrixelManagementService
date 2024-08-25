@@ -7,7 +7,14 @@ from typing import Literal
 from pydantic import BaseModel, Field, PositiveFloat, PositiveInt
 
 AvailablePrivatizers = Literal[
-    "blank", "latest", "naive_average", "naive_smoothing_average", "average", "smoothing_average"
+    "blank",
+    "latest",
+    "naive_average",
+    "naive_smoothing_average",
+    "average",
+    "smoothing_average",
+    "naive_kalman",
+    "kalman",
 ]
 
 
@@ -195,6 +202,45 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     }
 
 
+class NaiveKalmanPrivatizerConfig(PrivatizerConfig):
+    """Configuration options for the native kalman filter based privatizer."""
+
+    privatizer: Literal["naive_kalman"] = "naive_kalman"
+
+    # The oldest allowed age for incoming measurement and stale measurement station detection
+    max_measurement_age: timedelta = timedelta(minutes=5)
+
+    # The oldest allowed age of measurements, which used during averaging
+    max_measurement_age_averaging: timedelta = timedelta(minutes=2.5)
+
+    # Number of allowed missed sensor updates in comparison to the average update interval of the sensor
+    missed_update_threshold: float = 2
+
+    # Smoothing weight which is used for new values while determining the average update interval
+    update_interval_weight: float = Field(0.1, ge=0, le=1)
+
+    # The process uncertainty of the kalman filter for the time frame of one trixel_update_frequency
+    process_std_deviation_per_time_step: float = 1
+
+    # Default accuracy which is used if a sensor does not provide it's accuracy
+    default_sensor_accuracy: dict[MeasurementTypeEnum, float] = {
+        MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1,
+        MeasurementTypeEnum.RELATIVE_HUMIDITY: 1,
+    }
+
+    # Default accuracy which is used if the average accuracy of a trixel is not known
+    default_child_trixel_accuracy: dict[MeasurementTypeEnum, float] = {
+        MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.1,
+        MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.1,
+    }
+
+
+class KalmanPrivatizerConfig(CorrelationEvaluatingPrivatizerConfig, NaiveKalmanPrivatizerConfig):
+    """Additional configuration variables required by the (non-native) kalman privatizer."""
+
+    privatizer: Literal["kalman"] = "kalman"
+
+
 class AveragePrivatizerConfig(CorrelationEvaluatingPrivatizerConfig, NaiveAveragePrivatizerConfig):
     """Additional configuration variables required by the (non-naive) average privatizer."""
 
@@ -214,4 +260,5 @@ AvailablePrivatizerConfigs = (
     | NaiveSmoothingAveragePrivatizerConfig
     | AveragePrivatizerConfig
     | SmoothingAveragePrivatizerConfig
+    | NaiveKalmanPrivatizerConfig
 )

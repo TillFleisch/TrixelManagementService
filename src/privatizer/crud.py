@@ -211,3 +211,21 @@ async def get_sensor_age(
     if result := (await db.execute(query)).scalar_one_or_none():
         return datetime.now() - result
     return None
+
+
+async def get_sensor_accuracy(db: AsyncSession, unique_sensor_id: UniqueSensorId) -> float | None:
+    """
+    Get the registered accuracy for a specific sensor.
+
+    :param unique_sensor_id: The ID of the sensor for which the SensorDetail is retrieved
+    :returns: The registered accuracy of the sensor or None if unknown
+    """
+    query = (
+        select(ms_model.SensorDetail.accuracy)
+        .where(ms_model.SensorDetail.id == ms_model.Sensor.sensor_detail_id)
+        .where(
+            ms_model.Sensor.measurement_station_uuid == unique_sensor_id.ms_uuid
+            and ms_model.Sensor.id == unique_sensor_id.sensor_id
+        )
+    )
+    return (await db.execute(query)).scalar_one_or_none()

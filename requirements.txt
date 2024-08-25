@@ -10,3 +10,4 @@ sqlalchemy-timescaledb==0.4.1
 pynyhtm==0.1.0
 PyJWT~=2.8
 aiosqlite==0.20.0
+filterpy~=1.4

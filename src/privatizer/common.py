@@ -3,6 +3,7 @@
 from privatizer.blank_privatizer import BlankPrivatizer
 from privatizer.combined_privatizers import (
     AveragePrivatizer,
+    KalmanPrivatizer,
     SmoothingAveragePrivatizer,
 )
 from privatizer.config_schema import AvailablePrivatizers
@@ -11,6 +12,7 @@ from privatizer.naive_average_privatizer import (
     NaiveAveragePrivatizer,
     NaiveSmoothingAveragePrivatizer,
 )
+from privatizer.naive_kalman_privatizer import NaiveKalmanPrivatizer
 from privatizer.privatizer import Privatizer
 
 privatizer_lookup: dict[AvailablePrivatizers, type[Privatizer]] = {
@@ -20,6 +22,8 @@ privatizer_lookup: dict[AvailablePrivatizers, type[Privatizer]] = {
     "naive_smoothing_average": NaiveSmoothingAveragePrivatizer,
     "average": AveragePrivatizer,
     "smoothing_average": SmoothingAveragePrivatizer,
+    "naive_kalman": NaiveKalmanPrivatizer,
+    "kalman": KalmanPrivatizer,
 }
 
 

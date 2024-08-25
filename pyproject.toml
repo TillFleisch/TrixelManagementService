@@ -33,6 +33,7 @@ dependencies = [
     'pynyhtm',
     'PyJWT',
     'aiosqlite',
+    'filterpy',
 ]
 
 [project.urls]
