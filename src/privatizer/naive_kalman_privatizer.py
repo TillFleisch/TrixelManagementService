@@ -106,6 +106,7 @@ class NaiveKalmanPrivatizer(Privatizer):
         for sensor in sensors_to_remove:
             logger.debug(f"Removing stale sensor {sensor} from privatizer ({self._id},{self._measurement_type})")
             await self.manager_remove_sensor(sensor)
+            await self.remove_sensor(sensor)
 
     async def add_sensor(self, unique_sensor_id: UniqueSensorId, should_evaluate: bool) -> None:
         """Retrieve sensor details if they are added to this privatizer."""

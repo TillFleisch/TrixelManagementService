@@ -89,6 +89,7 @@ class NaiveAveragePrivatizer(Privatizer):
         for sensor in sensors_to_remove:
             logger.debug(f"Removing stale sensor {sensor} from privatizer ({self._id},{self._measurement_type})")
             await self.manager_remove_sensor(sensor)
+            await self.remove_sensor(sensor)
 
     async def remove_sensor(self, unique_sensor_id: UniqueSensorId) -> None:
         """Remove sensor related details, if a sensor is removed from this privatizer."""
