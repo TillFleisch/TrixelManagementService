@@ -428,7 +428,7 @@ class PrivacyManager:
         """
         while True:
             # Wait for TMS to be active (and for delegation to be loaded)
-            while not GlobalConfig.config.tms_config.active:
+            while not GlobalConfig.config.tms_config.active or len(GlobalConfig.config.tms_config.delegations) == 0:
                 await asyncio.sleep(0.1)
                 # TODO: replace spin lock with asyncio events
 
