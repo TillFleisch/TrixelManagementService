@@ -1,6 +1,6 @@
 """Database wrappers which are related to privatizer implementations."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Tuple
 
 from pydantic import PositiveInt
@@ -38,7 +38,7 @@ async def get_sensor_average(
     query = (
         select(func.avg(ms_model.SensorMeasurement.value))
         .where(or_(*clauses))
-        .where(ms_model.SensorMeasurement.time > datetime.now() - time_period)
+        .where(ms_model.SensorMeasurement.time > datetime.now(timezone.utc) - time_period)
     )
 
     return (await db.execute(query)).scalar_one_or_none()
@@ -62,7 +62,7 @@ async def get_trixel_average(
             model.Observation.measurement_type == model.MeasurementType.id,
             model.MeasurementType.name == measurement_type,
         )
-        .where(model.Observation.time > datetime.now() - time_period)
+        .where(model.Observation.time > datetime.now(timezone.utc) - time_period)
     )
 
     return (await db.execute(query)).scalar_one_or_none()
@@ -82,7 +82,7 @@ async def get_measurement_count(
         select(func.count(ms_model.SensorMeasurement.time), func.count(ms_model.SensorMeasurement.value))
         .where(ms_model.SensorMeasurement.measurement_station_uuid == unique_sensor_id.ms_uuid)
         .where(ms_model.SensorMeasurement.sensor_id == unique_sensor_id.sensor_id)
-        .where(ms_model.SensorMeasurement.time > datetime.now() - time_period)
+        .where(ms_model.SensorMeasurement.time > datetime.now(timezone.utc) - time_period)
     )
 
     return (await db.execute(query)).one()
@@ -103,7 +103,7 @@ async def get_observation_count(
         select(func.count(model.Observation.time), func.count(model.Observation.value))
         .where(model.Observation.trixel_id == trixel_id)
         .where(model.Observation.measurement_type == measurement_type.get_id())
-        .where(model.Observation.time > datetime.now() - time_period)
+        .where(model.Observation.time > datetime.now(timezone.utc) - time_period)
     )
 
     return (await db.execute(query)).one()
@@ -130,7 +130,7 @@ async def get_trixel_median(
             sub_type.name == measurement_type,
         )
         .where(sub_observation.value != None)  # noqa: 711
-        .where(sub_observation.time > datetime.now() - time_period)
+        .where(sub_observation.time > datetime.now(timezone.utc) - time_period)
         .scalar_subquery()
     )
 
@@ -142,7 +142,7 @@ async def get_trixel_median(
             model.MeasurementType.name == measurement_type,
         )
         .where(model.Observation.value != None)  # noqa: 711
-        .where(model.Observation.time > datetime.now() - time_period)
+        .where(model.Observation.time > datetime.now(timezone.utc) - time_period)
         .order_by(model.Observation.value)
         .offset(cast(sub_query / 2.0, Integer))
         .limit(1)
@@ -175,7 +175,7 @@ async def get_sensors_median(
         select(func.count(ms_model.SensorMeasurement.value))
         .where(or_(*clauses))
         .where(ms_model.SensorMeasurement.value != None)  # noqa: 711
-        .where(ms_model.SensorMeasurement.time > datetime.now() - time_period)
+        .where(ms_model.SensorMeasurement.time > datetime.now(timezone.utc) - time_period)
         .scalar_subquery()
     )
 
@@ -183,7 +183,7 @@ async def get_sensors_median(
         select(ms_model.SensorMeasurement.value)
         .where(or_(*clauses))
         .where(ms_model.SensorMeasurement.value != None)  # noqa: 711
-        .where(ms_model.SensorMeasurement.time > datetime.now() - time_period)
+        .where(ms_model.SensorMeasurement.time > datetime.now(timezone.utc) - time_period)
         .order_by(ms_model.SensorMeasurement.value)
         .offset(cast(sub_query / 2.0, Integer))
         .limit(1)
@@ -206,10 +206,10 @@ async def get_sensor_age(
         select(func.min(ms_model.SensorMeasurement.time))
         .where(ms_model.SensorMeasurement.measurement_station_uuid == unique_sensor_id.ms_uuid)
         .where(ms_model.SensorMeasurement.sensor_id == unique_sensor_id.sensor_id)
-        .where(ms_model.SensorMeasurement.time > datetime.now() - time_period)
+        .where(ms_model.SensorMeasurement.time > datetime.now(timezone.utc) - time_period)
     )
     if result := (await db.execute(query)).scalar_one_or_none():
-        return datetime.now() - result
+        return datetime.now(timezone.utc) - result
     return None
 
 
