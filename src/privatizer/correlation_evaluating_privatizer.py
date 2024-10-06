@@ -16,7 +16,7 @@ from measurement_station.schema import Measurement
 from model import MeasurementTypeEnum
 from privatizer.config_schema import (
     CorrelationEvaluatingPrivatizerConfig,
-    MedianCorrelationSettings,
+    StatisticCorrelationSettings,
 )
 from privatizer.privatizer import Privatizer
 from privatizer.schema import SensorLifeCycleBase, UniqueSensorId
@@ -46,11 +46,11 @@ class SensorLifeCycleDetailed(SensorLifeCycleBase):
     age: timedelta | None = None
     age_last_update: datetime | None = None
 
-    # Cache for sensor median values
-    sensor_median: dict[PositiveInt, float | None] | None = None
+    # Cache for sensor statistic (median/average) values
+    sensor_statistic: dict[PositiveInt, float | None] | None = None
 
     # Timestamp at which sensors were last evaluated
-    sensor_median_last_update: dict[PositiveInt, datetime] | None = None
+    sensor_statistic_last_update: dict[PositiveInt, datetime] | None = None
 
     local_correlation_score: float | None = None
 
@@ -69,17 +69,17 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
 
     config: ClassVar[CorrelationEvaluatingPrivatizerConfig] = GlobalConfig.config.privatizer_config
 
-    # Cache for median value of all local sensors for different time periods (in seconds)
-    local_sensor_median: dict[PositiveInt, float | None]
+    # Cache for statistic (median/average) value of all local sensors for different time periods (in seconds)
+    local_sensor_statistic: dict[PositiveInt, float | None]
 
-    # Timestamp at which the local median was last updated
-    local_sensor_median_last_update: dict[PositiveInt, datetime]
+    # Timestamp at which the local statistic (median/average) was last updated
+    local_sensor_statistic_last_update: dict[PositiveInt, datetime]
 
-    # Cache for median value of this trixels output value for different time periods (in seconds)
-    trixel_median: dict[PositiveInt, float | None]
+    # Cache for statistic (median/average) value of this trixels output value for different time periods (in seconds)
+    trixel_statistic: dict[PositiveInt, float | None]
 
-    # Timestamp at which the trixel median was last updated
-    trixel_median_last_update: dict[PositiveInt, datetime]
+    # Timestamp at which the trixel statistic (median/average) was last updated
+    trixel_statistic_last_update: dict[PositiveInt, datetime]
 
     # Cache for the trixel observation count (nr of generated output values per timeframe)
     trixel_observation_count: dict[PositiveInt, PositiveInt]
@@ -105,10 +105,10 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
             get_k_requirement_method,
             remove_sensor_method,
         )
-        self.local_sensor_median = dict()
-        self.local_sensor_median_last_update = dict()
-        self.trixel_median = dict()
-        self.trixel_median_last_update = dict()
+        self.local_sensor_statistic = dict()
+        self.local_sensor_statistic_last_update = dict()
+        self.trixel_statistic = dict()
+        self.trixel_statistic_last_update = dict()
         self.trixel_observation_count = dict()
         self.trixel_observation_count_last_update = dict()
 
@@ -129,11 +129,12 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         * Local correlation
             * At the root level (or other higher levels), a comparison with the parent or neighbor trixels is not
               possible/feasible
-            * A sensors correlation is determined based on the deviation between the sensors median and the median of
-              all senors within this privatizer
+            * A sensors correlation is determined based on the deviation between the sensors statistic (median/average)
+              and the statistic of all senors within this privatizer
             * Once a set of correlating sensors has been chosen, at lower levels the trixel correlation will be used
         * Trixel correlation
-            * Determine if a sensor's median correlated with the median of the parent trixel and further ancestors
+            * Determine if a sensor's statistic (median/average) correlates with the statistic of the parent trixel and
+              further ancestors
             * Enforces local similarity
             * (the aggregated trixel measurements **should** only contain valid sensors, otherwise a cascade of
               decreasing quality may be started)
@@ -182,29 +183,29 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
             )
             return sensor_life_cycle.contributing
 
-        if self._level < self.config.local_trixel_median_check_split_level:
-            # Choose sensors that correlate with the median of all local sensors within this trixel, as long as there is
-            # still an unpopulated child trixel
+        if self._level < config.local_trixel_statistic_check_split_level:
+            # Choose sensors that correlate with the statistic of all local sensors within this trixel, as long as there
+            # is still an unpopulated child trixel
             # Thus, 'valid' sensors will be determined and they move on, the remaining sensors may get lucky in the next
-            # round, when the median changes.
+            # round, when the statistic changes.
             # Even if a sensor is deemed trustworthy, when it's not, at lower levels with higher spatial accuracy it may
             # be deemed untrustworthy but it helped in bootstrapping the system.
 
             # skip evaluation and wait if not enough sensors are present
-            if len(self._sensors) < self.config.local_check_minimum_sensor_count:
+            if len(self._sensors) < config.local_check_minimum_sensor_count:
                 return sensor_life_cycle.contributing
 
             score = await self.local_correlation_score(
                 unique_sensor_id=unique_sensor_id, sensor_life_cycle=sensor_life_cycle
             )
 
-            if score <= config.root_level_median_correlation_threshold:
+            if score is None or score <= config.root_level_statistic_correlation_threshold:
                 sensor_life_cycle.contributing = False
                 sensor_life_cycle.exclusion_reason = SensorLifeCycleDetailed.ExclusionReason.INSIGNIFICANT_CORRELATION
                 logger.debug(
                     (
                         f"Excluded {unique_sensor_id} with reason: {sensor_life_cycle.exclusion_reason} (local) - "
-                        f"score/correlation threshold: ({score}/{config.root_level_median_correlation_threshold})"
+                        f"score/correlation threshold: ({score}/{config.root_level_statistic_correlation_threshold})"
                     )
                 )
                 return sensor_life_cycle.contributing
@@ -213,13 +214,13 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                 unique_sensor_id=unique_sensor_id, sensor_life_cycle=sensor_life_cycle
             )
 
-            if score <= config.trixel_median_correlation_threshold:
+            if score <= config.trixel_statistic_correlation_threshold:
                 sensor_life_cycle.contributing = False
                 sensor_life_cycle.exclusion_reason = SensorLifeCycleDetailed.ExclusionReason.INSIGNIFICANT_CORRELATION
                 logger.debug(
                     (
                         f"Excluded {unique_sensor_id} with reason: {sensor_life_cycle.exclusion_reason} (trixel) - "
-                        f"score/correlation threshold: ({score}/{config.root_level_median_correlation_threshold})"
+                        f"score/correlation threshold: ({score}/{config.root_level_statistic_correlation_threshold})"
                     )
                 )
                 return sensor_life_cycle.contributing
@@ -332,7 +333,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         """
         config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
 
-        max_time_range = max(config.trixel_median_correlation_settings.keys())
+        max_time_range = max(config.trixel_statistic_correlation_settings.keys())
 
         if (
             sensor_life_cycle.age_last_update is None
@@ -350,7 +351,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         self, unique_sensor_id: UniqueSensorId, sensor_life_cycle: SensorLifeCycleDetailed
     ) -> float:
         """
-        Determine a sensors median correlation score in comparison to all other local sensors.
+        Determine a sensors statistic (median/average) correlation score in comparison to all other local sensors.
 
         :param unique_sensor_id: The ID of the sensor that is being evaluated
         :param sensor_life_cycle: the sensors lifecycle object
@@ -361,13 +362,14 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         # Check if cached which are used in the following have become invalid
         valid_cache: bool = True
         time_range: timedelta
-        for time_range in config.root_level_median_correlation_settings.keys():
+        for time_range in config.root_level_statistic_correlation_settings.keys():
             if (
-                datetime.now() - self.local_sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                datetime.now()
+                - self.local_sensor_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
                 > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
-                or sensor_life_cycle.sensor_median_last_update is None
+                or sensor_life_cycle.sensor_statistic_last_update is None
                 or datetime.now()
-                - sensor_life_cycle.sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                - sensor_life_cycle.sensor_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
                 > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
             ):
                 valid_cache = False
@@ -379,18 +381,18 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
 
             sub_scores: list[float] = list()
             time_range: timedelta
-            settings: MedianCorrelationSettings
-            for time_range, settings in config.root_level_median_correlation_settings.items():
-                local_sensor_median: float | None = await self.get_cached_local_median(db, time_range)
-                sensor_median: float | None = await self.get_cached_sensor_median(
+            settings: StatisticCorrelationSettings
+            for time_range, settings in config.root_level_statistic_correlation_settings.items():
+                local_sensor_statistic: float | None = await self.get_cached_local_statistic(db, time_range)
+                sensor_statistic: float | None = await self.get_cached_sensor_statistic(
                     db, unique_sensor_id, sensor_life_cycle, time_range
                 )
 
-                if sensor_median is None or local_sensor_median is None:
+                if sensor_statistic is None or local_sensor_statistic is None:
                     sensor_life_cycle.local_correlation_score = 0.0
                     return 0.0
 
-                delta = abs(local_sensor_median - sensor_median)
+                delta = abs(local_sensor_statistic - sensor_statistic)
                 max_delta = settings.max_delta[self.measurement_type]
 
                 if delta <= max_delta:
@@ -409,7 +411,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         self, unique_sensor_id: UniqueSensorId, sensor_life_cycle: SensorLifeCycleDetailed
     ) -> float:
         """
-        Determine a sensors median correlation score in comparison to parent/ancestor trixels.
+        Determine a sensors statistic (median/average) correlation score in comparison to parent/ancestor trixels.
 
         :param unique_sensor_id: The ID of the sensor that is being evaluated
         :param sensor_life_cycle: the sensors lifecycle object
@@ -420,17 +422,17 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         # Check if cached which are used in the following have become invalid
         valid_cache: bool = True
         time_range: timedelta
-        for time_range in config.trixel_median_correlation_settings.keys():
+        for time_range in config.trixel_statistic_correlation_settings.keys():
             if (
-                sensor_life_cycle.sensor_median_last_update is None
+                sensor_life_cycle.sensor_statistic_last_update is None
                 or datetime.now()
-                - sensor_life_cycle.sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                - sensor_life_cycle.sensor_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
                 > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
             ):
                 valid_cache = False
                 break
             privatizer: CorrelationEvaluatingPrivatizer | None = self
-            for i in range(0, config.trixel_median_check_generations + 2):
+            for i in range(0, config.trixel_statistic_check_generations + 2):
                 if privatizer._parent is None:
                     break
 
@@ -442,7 +444,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
 
                 if (
                     datetime.now()
-                    - privatizer.trixel_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+                    - privatizer.trixel_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
                     > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
                 ):
                     valid_cache = False
@@ -450,25 +452,25 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
             if not valid_cache:
                 break
 
-        if valid_cache:
+        if valid_cache and sensor_life_cycle.trixel_correlation_score is not None:
             return sensor_life_cycle.trixel_correlation_score
 
         async for db in get_db():
 
             sub_scores: list[float] = list()
             time_range: timedelta
-            settings: MedianCorrelationSettings
-            for time_range, settings in config.trixel_median_correlation_settings.items():
-                sensor_median: float | None = await self.get_cached_sensor_median(
+            settings: StatisticCorrelationSettings
+            for time_range, settings in config.trixel_statistic_correlation_settings.items():
+                sensor_statistic: float | None = await self.get_cached_sensor_statistic(
                     db, unique_sensor_id, sensor_life_cycle, time_range
                 )
 
-                if sensor_median is None:
+                if sensor_statistic is None:
                     sensor_life_cycle.trixel_correlation_score = 0.0
                     return 0.0
 
                 privatizer: CorrelationEvaluatingPrivatizer | None = self
-                for i in range(0, config.trixel_median_check_generations + 2):
+                for i in range(0, config.trixel_statistic_check_generations + 2):
 
                     if privatizer._parent is None:
                         break
@@ -485,22 +487,22 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
                     if i == 0:
                         continue
 
-                    trixel_median: float | None = await privatizer.get_cached_trixel_median(db, time_range)
+                    trixel_statistic: float | None = await privatizer.get_cached_trixel_statistic(db, time_range)
 
-                    if trixel_median is None:
+                    if trixel_statistic is None:
                         sensor_life_cycle.trixel_correlation_score = 0.0
                         return 0.0
 
-                    delta = abs(trixel_median - sensor_median)
+                    delta = abs(trixel_statistic - sensor_statistic)
                     max_delta = settings.max_delta[self.measurement_type]
 
-                    # If the privatizers level is higher than the target level of the trixel median correlation check
+                    # If the privatizers level is higher than the target level of the trixel statistic correlation check
                     # setting, increase the setting's tolerance
-                    if privatizer._level < config.local_trixel_median_check_split_level:
+                    if privatizer._level < config.local_trixel_statistic_check_split_level:
                         max_delta = (
                             max_delta
-                            + (config.local_trixel_median_check_target_level - privatizer._level)
-                            * config.trixel_median_level_scale_factor
+                            + (config.local_trixel_statistic_check_target_level - privatizer._level)
+                            * config.trixel_statistic_level_scale_factor
                             * max_delta
                         )
 
@@ -521,7 +523,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         sensor_life_cycle.trixel_correlation_score = 0.0
         return 0.0
 
-    async def get_cached_sensor_median(
+    async def get_cached_sensor_statistic(
         self,
         db: AsyncSession,
         unique_sensor_id: UniqueSensorId,
@@ -529,68 +531,88 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
         time_range: timedelta,
     ) -> float | None:
         """
-        Get a sensors median measurement either from cache or from DB.
+        Get a sensors statistic (median/average) measurement either from cache or from DB.
 
         :param unique_sensor_id: The unique identifier of the sensor in question
         :param sensor_life_cycle: A reference to the sensors lifecycle object
-        :param time_range: The time range for which the median is determined
-        :returns: The median value or None if unknown
+        :param time_range: The time range for which the statistic is determined
+        :returns: The statistic (median/average) value or None if unknown
         """
-        if sensor_life_cycle.sensor_median is None:
-            sensor_life_cycle.sensor_median = dict()
-            sensor_life_cycle.sensor_median_last_update = dict()
+        config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
+        if sensor_life_cycle.sensor_statistic is None:
+            sensor_life_cycle.sensor_statistic = dict()
+            sensor_life_cycle.sensor_statistic_last_update = dict()
 
         if (
             datetime.now()
-            - sensor_life_cycle.sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
-            > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
+            - sensor_life_cycle.sensor_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+            > time_range / config.cache_invalidation_factor
         ):
-            sensor_life_cycle.sensor_median[time_range.seconds] = await crud.get_sensors_median(
-                db, {unique_sensor_id}, time_range
-            )
-            sensor_life_cycle.sensor_median_last_update[time_range.seconds] = datetime.now()
+            if config.statistic_type == "average":
+                sensor_life_cycle.sensor_statistic[time_range.seconds] = await crud.get_sensor_average(
+                    db, {unique_sensor_id}, time_range
+                )
+            elif config.statistic_type == "median":
+                sensor_life_cycle.sensor_statistic[time_range.seconds] = await crud.get_sensors_median(
+                    db, {unique_sensor_id}, time_range
+                )
+            sensor_life_cycle.sensor_statistic_last_update[time_range.seconds] = datetime.now()
 
-        return sensor_life_cycle.sensor_median.get(time_range.seconds, None)
+        return sensor_life_cycle.sensor_statistic.get(time_range.seconds, None)
 
-    async def get_cached_local_median(
+    async def get_cached_local_statistic(
         self,
         db: AsyncSession,
         time_range: timedelta,
     ) -> float | None:
         """
-        Get the median measurement of all sensors within this trixel either from cache or DB.
+        Get the statistic (median/average) measurement of all sensors within this trixel either from cache or DB.
 
-        :param time_range: The time range for which the median is determined
-        :return: The median measurement or None if unknown
+        :param time_range: The time range for which the statistic is determined
+        :return: The statistic (median/average) measurement or None if unknown
         """
+        config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
         # TODO: perform evaluation (and caching) using a privatizer-specific lock to prevent redundant/multiple eval.
         if (
-            datetime.now() - self.local_sensor_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+            datetime.now() - self.local_sensor_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
             > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
         ):
-            self.local_sensor_median[time_range.seconds] = await crud.get_sensors_median(db, self._sensors, time_range)
-            self.local_sensor_median_last_update[time_range.seconds] = datetime.now()
+            if config.statistic_type == "average":
+                self.local_sensor_statistic[time_range.seconds] = await crud.get_sensor_average(
+                    db, self._sensors, time_range
+                )
+            elif config.statistic_type == "median":
+                self.local_sensor_statistic[time_range.seconds] = await crud.get_sensors_median(
+                    db, self._sensors, time_range
+                )
+            self.local_sensor_statistic_last_update[time_range.seconds] = datetime.now()
 
-        return self.local_sensor_median.get(time_range.seconds, None)
+        return self.local_sensor_statistic.get(time_range.seconds, None)
 
-    async def get_cached_trixel_median(self, db: AsyncSession, time_range: timedelta) -> float | None:
+    async def get_cached_trixel_statistic(self, db: AsyncSession, time_range: timedelta) -> float | None:
         """
-        Get the median of the resulting output value of this trixel either from cache or DB.
+        Get the statistic (median/average) of the resulting output value of this trixel either from cache or DB.
 
-        :param time_range: The time range for which the median is determined
-        :returns: The median value of the observations generated by this trixel or none if unavailable
+        :param time_range: The time range for which the statistic is determined
+        :returns: The statistic (median/avg.) value of the observations generated by this trixel or none if unavailable
         """
+        config: CorrelationEvaluatingPrivatizerConfig = CorrelationEvaluatingPrivatizer.config
         # TODO: perform evaluation (and caching) using a privatizer-specific lock to prevent redundant/multiple eval.
         if (
-            datetime.now() - self.trixel_median_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
+            datetime.now() - self.trixel_statistic_last_update.get(time_range.seconds, datetime.fromtimestamp(0))
             > time_range / CorrelationEvaluatingPrivatizer.config.cache_invalidation_factor
         ):
-            self.trixel_median[time_range.seconds] = await crud.get_trixel_median(
-                db, trixel_id=self._id, measurement_type=self._measurement_type, time_period=time_range
-            )
-            self.trixel_median_last_update[time_range.seconds] = datetime.now()
+            if config.statistic_type == "average":
+                self.trixel_statistic[time_range.seconds] = await crud.get_trixel_average(
+                    db, trixel_id=self._id, measurement_type=self._measurement_type, time_period=time_range
+                )
+            elif config.statistic_type == "median":
+                self.trixel_statistic[time_range.seconds] = await crud.get_trixel_median(
+                    db, trixel_id=self._id, measurement_type=self._measurement_type, time_period=time_range
+                )
+            self.trixel_statistic_last_update[time_range.seconds] = datetime.now()
 
-        return self.trixel_median.get(time_range.seconds, None)
+        return self.trixel_statistic.get(time_range.seconds, None)
 
     async def get_cached_observation_count(self, db: AsyncSession, time_range: timedelta) -> NonNegativeInt:
         """
@@ -619,7 +641,7 @@ class CorrelationEvaluatingPrivatizer(Privatizer):
 
         :returns: True if the privatizer has made enough observations based on the config file
         """
-        if self._level == 0:
+        if self._level == 0 or self._level <= self.config.local_trixel_statistic_check_split_level - 1:
             return True
         else:
             async for db in get_db():

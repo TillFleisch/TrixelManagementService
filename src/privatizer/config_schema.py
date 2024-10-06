@@ -74,7 +74,7 @@ class MeasurementTypeEnum(enum.StrEnum):
     RELATIVE_HUMIDITY = "relative_humidity"
 
 
-class MedianCorrelationSettings(BaseModel):
+class StatisticCorrelationSettings(BaseModel):
     """Settings which are applied to the median correlation setting."""
 
     max_delta: dict[MeasurementTypeEnum, PositiveFloat]
@@ -84,6 +84,8 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     """Configuration variables required by the correlation evaluating privatizer."""
 
     privatizer: Literal["correlation_evaluation"] = "correlation_evaluation"
+
+    statistic_type: Literal["median", "average"] = "average"
 
     # Minimum time requirement which determines after what time a trixel is allowed to be sub-divided
     # The trixel must have generated an output value for at least the specified amount of time
@@ -117,28 +119,29 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # The extended time range multiplier which is used during sensor uptime evaluation to determine the larger timeframe
     uptime_long_time_multiplier: PositiveInt = 7
 
-    # Determines from which trixel level on the trixel median check is executed instead of the local correlation check
+    # Determines from which trixel level on the trixel statistic (median/average) check is executed instead of the local
+    # correlation check
     # Must be at least one, as the local correlation check is required for the root level
-    local_trixel_median_check_split_level: PositiveInt = 2
+    local_trixel_statistic_check_split_level: PositiveInt = 2
 
     # The minimum number of sensor which are required by a privatizer before the local minimum check is executed
     # If this requirement is not satisfied a sensor will retain it's lifecycle status
     local_check_minimum_sensor_count: PositiveInt = 15
 
-    # The local correlation is determined by comparing a sensors median to that of the median of all sensors within a
-    # privatizer. The score is calculated by checking the mean similarity across multiple time ranges. The score is 0
-    # if the difference between a sensors mean and the local mean is larger than the specified value. Otherwise a score
-    # score between 0 and 1 is determined which is 0 if the delta between the two values is 0 and 1 if it's equal to the
-    # value specified below.
+    # The local correlation is determined by comparing a sensors statistic (median/average) to that of the statistic of
+    # all sensors within a privatizer. The score is calculated by checking the mean similarity across multiple time
+    # ranges. The score is 0 if the difference between a sensors mean and the local mean is larger than the specified
+    # value. Otherwise a score score between 0 and 1 is determined which is 0 if the delta between the two values is 0
+    # and 1 if it's equal to the value specified below.
     # The final score is the largest score of any of the specified time ranges
-    root_level_median_correlation_settings: dict[timedelta, MedianCorrelationSettings] = {
-        timedelta(days=1): MedianCorrelationSettings(
+    root_level_statistic_correlation_settings: dict[timedelta, StatisticCorrelationSettings] = {
+        timedelta(days=1): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1.75}
         ),
-        timedelta(days=7): MedianCorrelationSettings(
+        timedelta(days=7): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1}
         ),
-        timedelta(weeks=2): MedianCorrelationSettings(
+        timedelta(weeks=2): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.8, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.8}
         ),
     }
@@ -146,22 +149,23 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # A further threshold can be required which filters sensors with high deviations from mean. 0.2 means, the sensors
     # mean deviation must at least be smaller than 60% of the setting above. A smaller value will allow more sensors
     # to pass, while a large value will only select those sensor which have very high correlation. Use 0 to disable.
-    root_level_median_correlation_threshold: float = 0.6
+    root_level_statistic_correlation_threshold: float = 0.6
 
-    # The trixel correlation is determined by comparing a sensors median to that of the privatizers output.
+    # The trixel correlation is determined by comparing a sensors statistic (median/average) to that of the privatizers
+    # output.
     # The score is calculated by checking the mean similarity across multiple time ranges. The score is 0
     # if the difference between a sensors mean and the trixel mean is larger than the specified value. Otherwise a score
     # score between 0 and 1 is determined which is 0 if the delta between the two values is 0 and 1 if it's equal to the
     # value specified below.
     # The final score is the largest score of any of the specified time ranges
-    trixel_median_correlation_settings: dict[timedelta, MedianCorrelationSettings] = {
-        timedelta(days=1): MedianCorrelationSettings(
+    trixel_statistic_correlation_settings: dict[timedelta, StatisticCorrelationSettings] = {
+        timedelta(days=1): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 2, MeasurementTypeEnum.RELATIVE_HUMIDITY: 2}
         ),
-        timedelta(days=7): MedianCorrelationSettings(
+        timedelta(days=7): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1}
         ),
-        timedelta(weeks=2): MedianCorrelationSettings(
+        timedelta(weeks=2): StatisticCorrelationSettings(
             max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.75}
         ),
     }
@@ -169,24 +173,24 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # A further threshold can be required which filters sensors with high deviations from mean. 0.3 means, the sensors
     # mean deviation must at least be smaller than 70% of the setting above. A smaller value will allow more sensors
     # to pass, while a large value will only select those sensor which have very high correlation. Use 0 to disable.
-    trixel_median_correlation_threshold: float = 0.3
+    trixel_statistic_correlation_threshold: float = 0.3
 
     # Determines how many layers of (grand-)parent trixels are checked during the trixel similarity evaluation
     # A value of 1 is equal to only the grand-parent trixel (assumption: a trixel is contributing to the parent trixel,
     # therefore, this is essentially equal to comparing with 1 layer up rather than 2 layers up (in most cases))
-    trixel_median_check_generations: PositiveInt = 2
+    trixel_statistic_check_generations: PositiveInt = 2
 
-    # Determines at which level the `trixel_median_correlation_settings` apply. At lower levels the exact settings are
-    # used. At higher levels, the `max_deltas` are multiplied with the `trixel_median_level_scale_factor` depending on
-    # how far they are away from `local_trixel_median_check_target_level`. Thus, at higher levels lower tolerance is
-    # required to pass the correlation check.
-    # The largest tolerance is dependent on this `local_trixel_median_check_target_level` value.
-    # Given `local_trixel_median_check_target_level=8` and `trixel_median_level_scale_factor=0.5` and  a correlation
-    # setting with a `max_delta` of `2`, the largest tolerance at level 1 would be: 2 + (8-1) * 0.1 * 2 = 3.4
-    local_trixel_median_check_target_level: int = 8
+    # Determines at which level the `trixel_statistic_correlation_settings` apply. At lower levels the exact settings
+    # are used. At higher levels, the `max_deltas` are multiplied with the `trixel_statistic_level_scale_factor`
+    # depending on how far they are away from `local_trixel_statistic_check_target_level`. Thus, at higher levels lower
+    # tolerance is required to pass the correlation check.
+    # The largest tolerance is dependent on this `local_trixel_statistic_check_target_level` value.
+    # Given `local_trixel_statistic_check_target_level=8` and `trixel_statistic_level_scale_factor=0.1` and a
+    # correlation setting with a `max_delta` of `2`, the largest tolerance at level 1 would be: 2 + (8-1) * 0.1 * 2 =3.4
+    local_trixel_statistic_check_target_level: int = 8
 
     # The factor by which the max_delta requirement is multiplied for each increased level
-    trixel_median_level_scale_factor: float = 0.1
+    trixel_statistic_level_scale_factor: float = 0.1
 
     # Determines how often a cached value for time based metrics is invalidated. A value of 4 means, a cached value for
     # a time frame of 1 hour will be invalidated every 15 minutes
@@ -197,8 +201,8 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
 
     # The threshold which must be exceeded (in comparison to ema) by in order for a measurement to be discarded
     sensor_impact_noise_threshold: dict[MeasurementTypeEnum, PositiveFloat] = {
-        MeasurementTypeEnum.AMBIENT_TEMPERATURE: 20,
-        MeasurementTypeEnum.RELATIVE_HUMIDITY: 20,
+        MeasurementTypeEnum.AMBIENT_TEMPERATURE: 7,
+        MeasurementTypeEnum.RELATIVE_HUMIDITY: 7,
     }
 
 
