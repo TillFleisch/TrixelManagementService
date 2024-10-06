@@ -13,7 +13,7 @@ dev = ["black", "isort", "pytest", "pytest-asyncio", "respx", "pytest-order", "p
 
 [project]
 name = "trixelmanagementserver"
-version = "0.1.0"
+version = "0.2.0"
 description = "The Trixel-Management-Service (server) handles participating measurement stations and ensures location and data-privacy."
 readme = "README.md"
 authors = [{ name = "Till", email = "till@fleisch.dev" }]
