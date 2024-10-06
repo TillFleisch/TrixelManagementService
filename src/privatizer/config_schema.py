@@ -45,7 +45,7 @@ class NaiveAveragePrivatizerConfig(PrivatizerConfig):
     # The oldest allowed age for incoming measurement and stale measurement station detection
     max_measurement_age: timedelta = timedelta(minutes=5)
 
-    # The oldest allowed age of measurements, which used during averaging
+    # The oldest allowed age of measurements, which are used during averaging
     max_measurement_age_averaging: timedelta = timedelta(minutes=2.5)
 
     # Number of allowed missed sensor updates in comparison to the average update interval of the sensor
@@ -89,7 +89,7 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
 
     # Minimum time requirement which determines after what time a trixel is allowed to be sub-divided
     # The trixel must have generated an output value for at least the specified amount of time
-    privatizer_subdivision_time_requirement: timedelta = timedelta(days=2)
+    privatizer_subdivision_time_requirement: timedelta = timedelta(days=4)
 
     # Minimum threshold that must be met for a trixel to be sub-divided. This variable provides a margin of for the
     # `privatizer_subdivision_time_requirement` such that a trixels sub-division is not prevented if it temporarily does
@@ -103,7 +103,7 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     age_evaluation_interval: timedelta = timedelta(days=0.5)
 
     # Minimum uptime score requirement that must be met by sensor; The score is evaluated according to `evaluate_uptime`
-    uptime_requirement: float = Field(0.95, ge=0, le=1)
+    uptime_requirement: float = Field(0.975, ge=0, le=1)
 
     # The minimum interval between measurement updates that must be met by a sensor in order for it to not be excluded
     max_update_interval: timedelta = timedelta(minutes=10)
@@ -117,7 +117,7 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     uptime_base_time_range: timedelta = timedelta(days=1)
 
     # The extended time range multiplier which is used during sensor uptime evaluation to determine the larger timeframe
-    uptime_long_time_multiplier: PositiveInt = 7
+    uptime_long_time_multiplier: PositiveInt = 4
 
     # Determines from which trixel level on the trixel statistic (median/average) check is executed instead of the local
     # correlation check
@@ -136,20 +136,20 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # The final score is the largest score of any of the specified time ranges
     root_level_statistic_correlation_settings: dict[timedelta, StatisticCorrelationSettings] = {
         timedelta(days=1): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1.75}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.9, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.9}
         ),
         timedelta(days=7): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.9, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.9}
         ),
         timedelta(weeks=2): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.8, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.8}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.85, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.85}
         ),
     }
 
     # A further threshold can be required which filters sensors with high deviations from mean. 0.2 means, the sensors
     # mean deviation must at least be smaller than 60% of the setting above. A smaller value will allow more sensors
     # to pass, while a large value will only select those sensor which have very high correlation. Use 0 to disable.
-    root_level_statistic_correlation_threshold: float = 0.6
+    root_level_statistic_correlation_threshold: float = 0.3
 
     # The trixel correlation is determined by comparing a sensors statistic (median/average) to that of the privatizers
     # output.
@@ -160,20 +160,20 @@ class CorrelationEvaluatingPrivatizerConfig(PrivatizerConfig):
     # The final score is the largest score of any of the specified time ranges
     trixel_statistic_correlation_settings: dict[timedelta, StatisticCorrelationSettings] = {
         timedelta(days=1): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 2, MeasurementTypeEnum.RELATIVE_HUMIDITY: 2}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1.75}
         ),
         timedelta(days=7): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1.75}
         ),
         timedelta(weeks=2): StatisticCorrelationSettings(
-            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 0.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 0.75}
+            max_delta={MeasurementTypeEnum.AMBIENT_TEMPERATURE: 1.75, MeasurementTypeEnum.RELATIVE_HUMIDITY: 1.75}
         ),
     }
 
     # A further threshold can be required which filters sensors with high deviations from mean. 0.3 means, the sensors
     # mean deviation must at least be smaller than 70% of the setting above. A smaller value will allow more sensors
     # to pass, while a large value will only select those sensor which have very high correlation. Use 0 to disable.
-    trixel_statistic_correlation_threshold: float = 0.3
+    trixel_statistic_correlation_threshold: float = 0.0
 
     # Determines how many layers of (grand-)parent trixels are checked during the trixel similarity evaluation
     # A value of 1 is equal to only the grand-parent trixel (assumption: a trixel is contributing to the parent trixel,
